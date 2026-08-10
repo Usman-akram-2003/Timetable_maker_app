@@ -2368,7 +2368,7 @@ class _AllocatorScreenState extends State<AllocatorScreen> {
       
       if (!mounted) return;
       // Show what was fixed
-      showDialog(
+      await showDialog(
         context: context,
         builder: (_) => AlertDialog(
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
