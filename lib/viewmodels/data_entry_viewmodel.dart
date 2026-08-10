@@ -1889,6 +1889,7 @@ class DataEntryViewModel extends ChangeNotifier {
   // overwrites the one saved snapshot — no history stack, by design.
   List<Assignment>? _undoSnapshot;
   String? _undoLabel;
+  Timer? _undoTimer;
 
   bool get canUndo => _undoSnapshot != null;
   String? get undoLabel => _undoLabel;
@@ -1896,6 +1897,12 @@ class DataEntryViewModel extends ChangeNotifier {
   void snapshotForUndo(String label) {
     _undoSnapshot = List<Assignment>.from(_assignments);
     _undoLabel = label;
+    _undoTimer?.cancel();
+    _undoTimer = Timer(const Duration(seconds: 5), () {
+      _undoSnapshot = null;
+      _undoLabel = null;
+      notifyListeners();
+    });
     notifyListeners();
   }
 
@@ -1906,6 +1913,7 @@ class DataEntryViewModel extends ChangeNotifier {
       ..addAll(_undoSnapshot!);
     _undoSnapshot = null;
     _undoLabel = null;
+    _undoTimer?.cancel();
     notifyListeners();
     _saveData();
   }

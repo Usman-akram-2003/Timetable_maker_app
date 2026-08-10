@@ -41,6 +41,7 @@ class AllocatorScreen extends StatefulWidget {
 }
 
 class _AllocatorScreenState extends State<AllocatorScreen> {
+  bool _isFixingClashes = false;
   Teacher?    _teacher;
   Course?     _course;
   ClassModel? _class;
@@ -2343,26 +2344,33 @@ class _AllocatorScreenState extends State<AllocatorScreen> {
     });
   }
 
-  void _doFixClashes(DataEntryViewModel dataVm, AllocatorViewModel allocVm) {
-    if (_checkLock()) return;
-    final workingDays = context.read<SettingsViewModel>().workingDays;
-    final fixes = dataVm.fixTeacherClashes(workingDays: workingDays);
-    if (fixes.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-          content: Text('No clashes found! Timetable is clean.',
-              style: GoogleFonts.plusJakartaSans(fontWeight: FontWeight.w600, color: Colors.white)),
-          backgroundColor: const Color(0xFF0D9488),
-          behavior: SnackBarBehavior.floating,
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-          margin: const EdgeInsets.all(16)));
-      return;
-    }
-    // Refresh schedule view
-    allocVm.validateAndApply(dataVm.assignments, dataVm.timeSlots, combinedRules: dataVm.combinedRules, rooms: dataVm.rooms);
-    // Show what was fixed
-    showDialog(
-      context: context,
-      builder: (_) => AlertDialog(
+  Future<void> _doFixClashes(DataEntryViewModel dataVm, AllocatorViewModel allocVm) async {
+    if (_checkLock() || _isFixingClashes) return;
+    setState(() => _isFixingClashes = true);
+    
+    try {
+      await Future.delayed(Duration.zero); // yield so UI can update and ignore subsequent taps
+      final workingDays = context.read<SettingsViewModel>().workingDays;
+      final fixes = dataVm.fixTeacherClashes(workingDays: workingDays);
+      if (fixes.isEmpty) {
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+            content: Text('No clashes found! Timetable is clean.',
+                style: GoogleFonts.plusJakartaSans(fontWeight: FontWeight.w600, color: Colors.white)),
+            backgroundColor: const Color(0xFF0D9488),
+            behavior: SnackBarBehavior.floating,
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+            margin: const EdgeInsets.all(16)));
+        return;
+      }
+      // Refresh schedule view
+      allocVm.validateAndApply(dataVm.assignments, dataVm.timeSlots, combinedRules: dataVm.combinedRules, rooms: dataVm.rooms);
+      
+      if (!mounted) return;
+      // Show what was fixed
+      showDialog(
+        context: context,
+        builder: (_) => AlertDialog(
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
         title: Row(children: [
           Icon(Icons.auto_fix_high_rounded, color: AppTheme.error, size: 22),
@@ -2412,6 +2420,9 @@ class _AllocatorScreenState extends State<AllocatorScreen> {
         ],
       ),
     );
+    } finally {
+      if (mounted) setState(() => _isFixingClashes = false);
+    }
   }
 }
 
