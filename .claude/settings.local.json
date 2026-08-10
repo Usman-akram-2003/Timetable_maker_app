@@ -1,0 +1,32 @@
+{
+  "permissions": {
+    "allow": [
+      "Skill(run)",
+      "PowerShell(Get-Process *)",
+      "Bash(tasklist)",
+      "PowerShell(Stop-Process *)",
+      "PowerShell($wsUri = \"ws://127.0.0.1:63402/np74K1bQJ70=/ws\"; Write-Host \"App running at $wsUri - need hot restart for settings changes\")",
+      "Bash(flutter devices *)",
+      "Bash(flutter run *)",
+      "Bash(xargs wc -l)",
+      "Bash(awk '/class _CourseForm extends/,/^class _ClassesTab/' lib/views/screens/data_entry_screen.dart)",
+      "Bash(flutter analyze *)",
+      "Bash(find . -maxdepth 3 -iname \"*.claude*\" -not -path \"*/node_modules/*\")",
+      "Bash(ls .claude)",
+      "Bash(ls .claude/skills)",
+      "Bash(powershell -NoProfile -Command \"Get-Process -Name timetable_maker_app -ErrorAction SilentlyContinue | Stop-Process -Force; Get-Process -Name flutter -ErrorAction SilentlyContinue | Stop-Process -Force\")",
+      "Bash(powershell -NoProfile -Command \"Get-Process -Name timetable_maker_app -ErrorAction SilentlyContinue | Stop-Process -Force\")",
+      "Bash(dart analyze *)",
+      "Bash(dart --version)",
+      "Bash(mkdir -p /c/Projects/timetable_maker_app/tool)",
+      "Bash(cp \"/c/Users/Admin/AppData/Local/Temp/claude/C--Projects-timetable-maker-app/3c5fb2da-6f68-4e5b-9a37-8d664ae2f80e/scratchpad/test_restore.dart\" /c/Projects/timetable_maker_app/tool/test_restore.dart)",
+      "Bash(dart run *)",
+      "Bash(flutter build *)",
+      "Bash(tasklist //FI \"IMAGENAME eq timetable_maker_app.exe\")",
+      "Read(//c/Users/Admin/AppData/Local/Temp/claude/C--Projects-timetable-maker-app/b58a8dd8-1539-46cc-b97d-b0cf4d67cf53/tasks/**)",
+      "Read(//c/Users/Admin/AppData/Local/Temp/claude/C--Projects-timetable-maker-app/b58a8dd8-1539-46cc-b97d-b0cf4d67cf53/scratchpad/**)",
+      "Bash(timeout 45 bash -c 'until tasklist //FI \"IMAGENAME eq timetable_maker_app.exe\" 2>/dev/null | grep -q timetable_maker_app; do sleep 2; done; echo RUNNING')",
+      "Bash(\"/c/Projects/timetable_maker_app/build/windows/x64/runner/Debug/timetable_maker_app.exe\")"
+    ]
+  }
+}

@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "124116507988",
+    "project_id": "timetable-manager-22211",
+    "storage_bucket": "timetable-manager-22211.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:124116507988:android:700d7a8566be2557cebcc1",
+        "android_client_info": {
+          "package_name": "com.example.timetable_maker_app"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyCwk1HqiFulA3J2k0947_RADyliwSm-9iM"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
