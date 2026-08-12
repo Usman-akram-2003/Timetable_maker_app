@@ -2351,7 +2351,7 @@ class _AllocatorScreenState extends State<AllocatorScreen> {
     try {
       await Future.delayed(Duration.zero); // yield so UI can update and ignore subsequent taps
       final workingDays = context.read<SettingsViewModel>().workingDays;
-      final fixes = dataVm.fixTeacherClashes(workingDays: workingDays);
+      final fixes = await dataVm.fixTeacherClashes(workingDays: workingDays);
       if (fixes.isEmpty) {
         if (!mounted) return;
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(

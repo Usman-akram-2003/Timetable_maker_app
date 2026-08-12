@@ -2549,7 +2549,22 @@ class DataEntryViewModel extends ChangeNotifier {
   ///  2. CLASS clashes:   same class has two courses at overlapping times.
   ///
   /// Priority: Bachelors > Intermediate; within same level more days wins.
-  List<String> fixTeacherClashes({int workingDays = 6}) {
+  /// The slot a Time Slot Lock binds [a] to, or null if unlocked. Same
+  /// matching as the GA's lockedSlots (courseId + level + optional classId).
+  String? _lockedSlotIdFor(Assignment a) {
+    for (final l in _timeSlotLocks) {
+      if (l.courseId == a.course.id &&
+          l.level == a.classModel.level &&
+          (l.classId == null ||
+              l.classId!.isEmpty ||
+              l.classId == a.classModel.id)) {
+        return l.timeSlotId;
+      }
+    }
+    return null;
+  }
+
+  Future<List<String>> fixTeacherClashes({int workingDays = 6}) async {
     final messages = <String>[];
     // Pass -1: re-join previously split courses before clash-fixing — fewer,
     // whole records for the fixer to place, and the split damage is undone.
@@ -2618,6 +2633,12 @@ class DataEntryViewModel extends ChangeNotifier {
       // ═══════════════════════════════════════════════════════════════════════
       final origDuration = loser.duration; // sacred — never change this
 
+      // Time Slot Lock awareness: a lock-bound course must STAY in its locked
+      // period — Fix Now may only re-arrange its days there (Strategy 0),
+      // never relocate it. Without this, Fix Now "resolved" clashes by
+      // silently moving locked courses out of the very slot the user locked.
+      final lockedTs = _lockedSlotIdFor(loser);
+
       // Strategy 0: Day Slide — shift start day within the SAME period.
       // Cheapest fix: no period change, just different days to avoid the clash.
       {
@@ -2658,6 +2679,7 @@ class DataEntryViewModel extends ChangeNotifier {
         for (final candidate in _timeSlots.where((t) =>
             t.level == loser.classModel.level &&
             t.id != loser.timeSlotId &&
+            (lockedTs == null || t.id == lockedTs) &&
             (shiftAllowed == null || shiftAllowed.contains(t.id)))) {
           if (_areDaysFreeInSlot(loserDays, candidate, loser.teacher.id,
               loser.classModel.id, loser.roomId, loser.id)) {
@@ -2684,7 +2706,7 @@ class DataEntryViewModel extends ChangeNotifier {
       // day-block + period. Uses the original duration to find a contiguous
       // block of exactly `origDuration` free days.
       final free2 = _findFreeDayAndSlot(loser, excludeAssignmentId: loser.id, maxDay: workingDays);
-      if (free2 != null) {
+      if (free2 != null && (lockedTs == null || free2.slot.id == lockedTs)) {
         _assignments[loserIdx] = loser.copyWith(
           id: _uid(),
           timeSlotId: free2.slot.id,
@@ -2715,6 +2737,11 @@ class DataEntryViewModel extends ChangeNotifier {
             if (!x.autoAssigned) continue;          // never swap with pinned
             if (x.classModel.level != loser.classModel.level) continue;
             if (x.timeSlotId == loser.timeSlotId) continue; // same period won't help
+            // Lock guards: loser may only land in its locked period, and the
+            // partner must not be pulled out of its own locked period.
+            if (lockedTs != null && x.timeSlotId != lockedTs) continue;
+            final xLock = _lockedSlotIdFor(x);
+            if (xLock != null && xLock != loser.timeSlotId) continue;
             final xSlot = _timeSlots.where((t) => t.id == x.timeSlotId).firstOrNull;
             if (xSlot == null) continue;
             // Check shift constraints (morning/evening for bachelors)
@@ -2771,6 +2798,7 @@ class DataEntryViewModel extends ChangeNotifier {
         for (final candidate in _timeSlots.where((t) =>
             t.level == loser.classModel.level &&
             t.id != loser.timeSlotId &&
+            (lockedTs == null || t.id == lockedTs) &&
             (shiftAllowed == null || shiftAllowed.contains(t.id)))) {
 
           // Find all auto-assigned courses blocking loser from entering candidate+loserDays
@@ -2778,6 +2806,8 @@ class DataEntryViewModel extends ChangeNotifier {
             if (bi == loserIdx) continue;
             final blocker = _assignments[bi];
             if (!blocker.autoAssigned) continue; // never cascade-move pinned
+            // Never cascade-move a lock-bound course out of its locked slot.
+            if (_lockedSlotIdFor(blocker) != null) continue;
             final bSlot = _timeSlots.where((t) => t.id == blocker.timeSlotId).firstOrNull;
             if (bSlot == null) continue;
             final bOverlapsCandidate = blocker.timeSlotId == candidate.id ||
@@ -2846,6 +2876,7 @@ class DataEntryViewModel extends ChangeNotifier {
         final shiftAllowed = effectiveAllowedSlotsForClass(loser.classModel.id, workingDays);
         for (final candidate in _timeSlots.where((t) =>
             t.level == loser.classModel.level &&
+            (lockedTs == null || t.id == lockedTs) &&
             (shiftAllowed == null || shiftAllowed.contains(t.id)))) {
           for (int sd = 1; sd <= workingDays - origDuration + 1; sd++) {
             final tryDays = List.generate(origDuration, (k) => sd + k);
@@ -2891,6 +2922,7 @@ class DataEntryViewModel extends ChangeNotifier {
           for (final bSlot in _timeSlots.where((t) =>
               t.level == loser.classModel.level &&
               t.id != loser.timeSlotId &&
+              (lockedTs == null || t.id == lockedTs) &&
               (loserShift == null || loserShift.contains(t.id)))) {
             if (found6) break;
             // Check: loser fits in bSlot+loserDays?
@@ -2902,6 +2934,8 @@ class DataEntryViewModel extends ChangeNotifier {
               if (ci == loserIdx) continue;
               final c = _assignments[ci];
               if (!c.autoAssigned) continue;       // never move pinned
+              // Never cycle a lock-bound course out of its locked slot.
+              if (_lockedSlotIdFor(c) != null) continue;
               if (c.timeSlotId != bSlot.id) continue;
               final cDays = c.occupiedSlots.toList()..sort();
               // c is in bSlot — see if c's days conflict with loserDays
@@ -2956,11 +2990,15 @@ class DataEntryViewModel extends ChangeNotifier {
         }
       }
 
-      messages.add(
-          '[$label] Could not relocate "${loser.course.code}" (${loser.classModel.shortCode}) '
-          '-- no free slot found; still clashing with "$winnerCode" on $dayStr. '
-          'Resolve manually via Transfers & Swap or use the Pinned Conflicts '
-          'panel in the GA Report to unpin one of the pair.');
+      messages.add(lockedTs != null
+          ? '[$label] "${loser.course.code}" (${loser.classModel.shortCode}) is '
+              'lock-bound to its time slot and no clash-free days exist there — '
+              'still clashing with "$winnerCode" on $dayStr. Remove the lock '
+              'for this class or free up that period.'
+          : '[$label] Could not relocate "${loser.course.code}" (${loser.classModel.shortCode}) '
+              '-- no free slot found; still clashing with "$winnerCode" on $dayStr. '
+              'Resolve manually via Transfers & Swap or use the Pinned Conflicts '
+              'panel in the GA Report to unpin one of the pair.');
       return false;
     }
 
@@ -3020,18 +3058,27 @@ class DataEntryViewModel extends ChangeNotifier {
     }
 
     int iterations = 0;
+    // Pairs whose FULL strategy ladder already failed this run. Every later
+    // iteration re-scans all pairs, so without this each stuck pair re-ran
+    // the exhaustive S0–S6 ladder once per successful fix elsewhere — the
+    // bulk of Fix Now's freeze on schedules with unresolvable clashes.
+    // ponytail: kept for the whole run (a stuck pair COULD become fixable
+    // after another move); the next Fix Now click retries everything.
+    final unresolvable = <String>{};
+    final slotById = {for (final t in _timeSlots) t.id: t};
     while (foundClash && iterations < 200) {
       iterations++;
       foundClash = false;
+      // Yield so the UI thread paints (spinner, window events) between passes.
+      await Future.delayed(Duration.zero);
       outer:
       for (int i = 0; i < _assignments.length; i++) {
         final a = _assignments[i];
-        final slotA = _timeSlots.where((t) => t.id == a.timeSlotId).firstOrNull;
+        final slotA = slotById[a.timeSlotId];
 
         for (int j = i + 1; j < _assignments.length; j++) {
           final b = _assignments[j];
-          final slotB =
-              _timeSlots.where((t) => t.id == b.timeSlotId).firstOrNull;
+          final slotB = slotById[b.timeSlotId];
 
           if (!overlaps(a.timeSlotId, b.timeSlotId, slotA, slotB)) continue;
 
@@ -3044,6 +3091,8 @@ class DataEntryViewModel extends ChangeNotifier {
 
           // Ã¢â€â‚¬Ã¢â€â‚¬ TEACHER CLASH Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
           if (a.teacher.id.isNotEmpty && a.teacher.id == b.teacher.id) {
+            final pk = '${a.id}|${b.id}';
+            if (unresolvable.contains(pk)) continue;
             final aIsBach = a.classModel.level == EducationLevel.bachelors;
             final bIsBach = b.classModel.level == EducationLevel.bachelors;
             // Pinned (manual) assignments are immovable — always treat them as
@@ -3073,11 +3122,14 @@ class DataEntryViewModel extends ChangeNotifier {
               foundClash = true;
               break outer;
             }
+            unresolvable.add(pk);
             continue;
           }
 
           // Ã¢â€â‚¬Ã¢â€â‚¬ CLASS CLASH Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
           if (a.classModel.id == b.classModel.id) {
+            final pk = '${a.id}|${b.id}';
+            if (unresolvable.contains(pk)) continue;
             final combinedCourseIds =
                 _combinedRules.map((r) => r.courseId).toSet();
             final aIsCombined = combinedCourseIds.contains(a.course.id);
@@ -3109,12 +3161,15 @@ class DataEntryViewModel extends ChangeNotifier {
               foundClash = true;
               break outer;
             }
+            unresolvable.add(pk);
             continue;
           }
 
           // Ã¢â€â‚¬Ã¢â€â‚¬ ROOM CLASH Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
           if (a.hasRoom && b.hasRoom && a.roomId == b.roomId) {
             if (isCombinedMatch(a, b)) continue;
+            final pk = '${a.id}|${b.id}';
+            if (unresolvable.contains(pk)) continue;
             // Pinned assignments win for room clashes too.
             final keepA = (!a.autoAssigned && b.autoAssigned)
                 ? true
@@ -3137,6 +3192,7 @@ class DataEntryViewModel extends ChangeNotifier {
               foundClash = true;
               break outer;
             }
+            unresolvable.add(pk);
             continue;
           }
         }
@@ -4022,6 +4078,7 @@ class DataEntryViewModel extends ChangeNotifier {
       // ponytail: O(n²) scan — only runs when every cheaper fix failed.
       for (final c in _assignments) {
         if (c.id == a.id || !eligible(c)) continue;
+        if (_lockedSlotIdFor(c) != null) continue; // never pull c off its lock
         final sc = _timeSlots.where((t) => t.id == c.timeSlotId).firstOrNull;
         if (sc == null) continue;
         if (swapOk(a, sa, c, sc)) return c;
@@ -4078,7 +4135,10 @@ class DataEntryViewModel extends ChangeNotifier {
     void addFallbacks(
         String clash, List<FixSuggestion> sug, List<Assignment> cards) {
       if (sug.isNotEmpty) return;
-      for (final card in cards.where(eligible)) {
+      // Lock-bound cards must stay in their locked period — never suggest
+      // moving/swapping them elsewhere (mirrors the Fix Now lock guards).
+      for (final card
+          in cards.where((x) => eligible(x) && _lockedSlotIdFor(x) == null)) {
         final free = _findFreeDayAndSlot(card,
             excludeAssignmentId: card.id, maxDay: workingDays);
         if (free != null) {
@@ -4086,7 +4146,8 @@ class DataEntryViewModel extends ChangeNotifier {
           return;
         }
       }
-      for (final card in cards.where(eligible)) {
+      for (final card
+          in cards.where((x) => eligible(x) && _lockedSlotIdFor(x) == null)) {
         final partner = swapPartner(card);
         if (partner != null) {
           sug.add(pairSwap(clash, card, partner));
@@ -4149,6 +4210,7 @@ class DataEntryViewModel extends ChangeNotifier {
                 x.occupiedSlots.length.compareTo(y.occupiedSlots.length));
           for (final card in ordered.where((x) =>
               eligible(x) &&
+              _lockedSlotIdFor(x) == null && // day-split scatters across slots
               x.classModel.level == EducationLevel.bachelors &&
               x.course.creditHours >= 2 &&
               x.course.creditHours <= 3)) {

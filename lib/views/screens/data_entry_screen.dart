@@ -14,6 +14,7 @@ import '../../models/teacher.dart';
 import '../../services/excel_import_service.dart';
 import '../../app_theme.dart';
 import '../../utils/responsive.dart';
+import 'timetable_grid_import_screen.dart';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Theme-aware helpers (accessed by all widgets in this file)
@@ -131,6 +132,8 @@ class _DataEntryScreenState extends State<DataEntryScreen>
       ])),
       const SizedBox(width: 12),
       _ImportBtn(),
+      const SizedBox(width: 8),
+      _ImportTimetableBtn(),
     ]),
   );
 
@@ -1528,6 +1531,47 @@ class _ImportBtn extends StatelessWidget {
           const Icon(Icons.upload_file_rounded, size: 18, color: col),
           const SizedBox(width: 8),
           Text('Import Excel', style: GoogleFonts.plusJakartaSans(
+              fontSize: 12, fontWeight: FontWeight.w700, color: col)),
+        ]),
+      ),
+    );
+  }
+}
+
+// ── IMPORT TIMETABLE BUTTON ───────────────────────────────────────────────────
+class _ImportTimetableBtn extends StatelessWidget {
+  @override
+  Widget build(BuildContext context) {
+    final isDark = context._dark;
+    const col = Color(0xFF6366F1); // indigo
+    return GestureDetector(
+      onTap: () => showDialog(
+        context: context,
+        barrierDismissible: false,
+        builder: (_) => Dialog(
+          backgroundColor: isDark ? const Color(0xFF0F172A) : Colors.white,
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+          insetPadding: const EdgeInsets.symmetric(horizontal: 24, vertical: 40),
+          child: SizedBox(
+            width: 720,
+            height: 600,
+            child: TimetableGridImportScreen(
+              onImportComplete: () => Navigator.of(context).pop(),
+            ),
+          ),
+        ),
+      ),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+        decoration: BoxDecoration(
+          color: col.withValues(alpha: isDark ? .15 : .10),
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: col.withValues(alpha: .4), width: 1.2),
+        ),
+        child: Row(mainAxisSize: MainAxisSize.min, children: [
+          const Icon(Icons.table_chart_rounded, size: 18, color: col),
+          const SizedBox(width: 8),
+          Text('Import Timetable', style: GoogleFonts.plusJakartaSans(
               fontSize: 12, fontWeight: FontWeight.w700, color: col)),
         ]),
       ),

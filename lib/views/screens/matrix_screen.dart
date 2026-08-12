@@ -64,6 +64,7 @@ class _MatrixScreenState extends State<MatrixScreen>
   String? _classFilter; // classModel.id — null = all classes
   bool _clashFreeDismissed = false;
   bool _fixingClashes = false;
+  bool _suggestingClashes = false;
   String _searchQuery = '';
   final TextEditingController _searchCtrl = TextEditingController();
 
@@ -76,11 +77,11 @@ class _MatrixScreenState extends State<MatrixScreen>
   // Suggest Fix dialog: lists every current clash with verified, concrete
   // data-change proposals. Each is applied ONLY via its own Apply button
   // (FixSuggestion.apply re-validates and never touches manual cards).
-  void _showSuggestFixDialog(BuildContext context, DataEntryViewModel dataVm,
+  Future<void> _showSuggestFixDialog(BuildContext context, DataEntryViewModel dataVm,
       AllocatorViewModel allocVm, int workingDays) {
     final groups = dataVm.suggestFixes(workingDays: workingDays);
     final messenger = ScaffoldMessenger.of(context);
-    showDialog(
+    return showDialog(
       context: context,
       builder: (dCtx) => AlertDialog(
         title: Text('Suggested Fixes',
@@ -422,7 +423,7 @@ class _MatrixScreenState extends State<MatrixScreen>
                             await Future.delayed(Duration.zero);
                             try {
                               dataVm.snapshotForUndo('Fix Now');
-                              final msgs = dataVm.fixTeacherClashes();
+                              final msgs = await dataVm.fixTeacherClashes();
                               allocVm.validateAndApply(
                                 dataVm.assignments,
                                 dataVm.timeSlots,
@@ -469,19 +470,34 @@ class _MatrixScreenState extends State<MatrixScreen>
                         // changes (teacher swap / day split / room change);
                         // nothing is applied without an explicit Apply click.
                         GestureDetector(
-                          onTap: () => _showSuggestFixDialog(
-                              context, dataVm, allocVm, settingsVm.workingDays),
+                          onTap: _suggestingClashes ? null : () {
+                            // Re-entrancy guard: suggestFixes() is heavy and
+                            // synchronous — without this, rapid taps stacked
+                            // several dialogs and compounded the freeze. Flag is
+                            // set before the (synchronous) work so re-taps hit
+                            // the null onTap; cleared when the dialog closes.
+                            setState(() => _suggestingClashes = true);
+                            _showSuggestFixDialog(
+                                    context, dataVm, allocVm, settingsVm.workingDays)
+                                .whenComplete(() {
+                              if (mounted) setState(() => _suggestingClashes = false);
+                            });
+                          },
                           child: Container(
                             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
                             decoration: BoxDecoration(
-                              color: const Color(0xFFB45309),
+                              color: const Color(0xFFB45309).withValues(alpha: _suggestingClashes ? .6 : 1),
                               borderRadius: BorderRadius.circular(10),
                               boxShadow: [BoxShadow(color: const Color(0xFFB45309).withValues(alpha: .35), blurRadius: 10, offset: const Offset(0, 3))],
                             ),
                             child: Row(mainAxisSize: MainAxisSize.min, children: [
-                              const Icon(Icons.lightbulb_rounded, color: Colors.white, size: 16),
+                              if (_suggestingClashes)
+                                const SizedBox(width: 16, height: 16,
+                                    child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+                              else
+                                const Icon(Icons.lightbulb_rounded, color: Colors.white, size: 16),
                               const SizedBox(width: 6),
-                              Text('Suggest', style: GoogleFonts.plusJakartaSans(
+                              Text(_suggestingClashes ? 'Working…' : 'Suggest', style: GoogleFonts.plusJakartaSans(
                                   color: Colors.white, fontWeight: FontWeight.w800, fontSize: 13)),
                             ]),
                           ),
