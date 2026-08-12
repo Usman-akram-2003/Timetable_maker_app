@@ -2347,10 +2347,11 @@ class _AllocatorScreenState extends State<AllocatorScreen> {
   Future<void> _doFixClashes(DataEntryViewModel dataVm, AllocatorViewModel allocVm) async {
     if (_checkLock() || _isFixingClashes) return;
     setState(() => _isFixingClashes = true);
+    // Read context-dependent values BEFORE any async gap
+    final workingDays = context.read<SettingsViewModel>().workingDays;
     
     try {
       await Future.delayed(Duration.zero); // yield so UI can update and ignore subsequent taps
-      final workingDays = context.read<SettingsViewModel>().workingDays;
       final fixes = await dataVm.fixTeacherClashes(workingDays: workingDays);
       if (fixes.isEmpty) {
         if (!mounted) return;

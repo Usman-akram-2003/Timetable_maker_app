@@ -62,7 +62,7 @@ class _TimetableGridImportScreenState extends State<TimetableGridImportScreen> {
         dataVm.snapshotForUndo('Before Timetable Import');
         // We can't batch-delete via public API — remove one by one
         final ids = dataVm.assignments.map((a) => a.id).toList();
-        for (final id in ids) dataVm.removeAssignment(id);
+        for (final id in ids) { dataVm.removeAssignment(id); }
       }
 
       _updateProgress(0.05, 'Creating time slots…');
@@ -185,7 +185,6 @@ class _TimetableGridImportScreenState extends State<TimetableGridImportScreen> {
           .toList()
         ..sort((a, b) => a.period.compareTo(b.period));
 
-      int skipped = 0;
       for (int i = 0; i < result.assignments.length; i++) {
         final draft = result.assignments[i];
 
@@ -193,24 +192,24 @@ class _TimetableGridImportScreenState extends State<TimetableGridImportScreen> {
         final teacher = teachers
             .where((t) => t.name.toLowerCase().trim() == draft.teacherName.toLowerCase().trim())
             .firstOrNull;
-        if (teacher == null) { skipped++; continue; }
+        if (teacher == null) continue;
 
         // Resolve course
         final code = _makeCode(draft.subjectName);
         final course = courses
             .where((c) => c.code.toLowerCase() == code.toLowerCase() && c.level == level)
             .firstOrNull;
-        if (course == null) { skipped++; continue; }
+        if (course == null) continue;
 
         // Resolve class
         final classModel = classes
             .where((c) => c.shortCode.toLowerCase().contains(draft.section.toLowerCase()) ||
                           c.name.toLowerCase() == draft.section.toLowerCase())
             .firstOrNull;
-        if (classModel == null) { skipped++; continue; }
+        if (classModel == null) continue;
 
         // Resolve time slot
-        if (draft.periodIndex >= timeSlots.length) { skipped++; continue; }
+        if (draft.periodIndex >= timeSlots.length) continue;
         final slot = timeSlots[draft.periodIndex];
 
         // Resolve room (optional)
@@ -706,7 +705,7 @@ class _ToggleRow extends StatelessWidget {
         Text(subtitle, style: GoogleFonts.plusJakartaSans(fontSize: 11,
             color: isDark ? AppTheme.textSecondary : AppTheme.lightTextSec)),
       ])),
-      Switch(value: value, onChanged: onChanged, activeColor: const Color(0xFF6366F1)),
+      Switch(value: value, onChanged: onChanged, activeThumbColor: const Color(0xFF6366F1)),
     ]);
   }
 }
