@@ -921,6 +921,7 @@ class _TimeSlotLocksSectionState extends State<_TimeSlotLocksSection> {
             const Spacer(),
             TextButton.icon(
               onPressed: () {
+                vm.snapshotForUndo('Fix Pinned Duplicates');
                 final log = vm.resyncTimeSlotLocks();
                 ScaffoldMessenger.of(context).showSnackBar(SnackBar(
                   content: Text(

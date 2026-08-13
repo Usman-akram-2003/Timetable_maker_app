@@ -1164,21 +1164,28 @@ class DataEntryViewModel extends ChangeNotifier {
 
   /// Global version of the same fix — not dependent on a Time Slot Lock
   /// existing. Finds any group of pinned (autoAssigned:false) assignments
-  /// that share the same course+level+period across DIFFERENT classes and
-  /// genuinely overlap on days (e.g. a teacher's several sections of the
-  /// same course all landing on identical days by mistake, same root cause
-  /// as the locked-course case: the Allocator's "Manual period, Auto days"
-  /// combo pins both). Destaggers + unpins them using the same day-search
-  /// as `_applyLockToAssignments`, but scoped strictly to that group's own
-  /// members — it never relocates anything from a different period, and
-  /// never touches a group that's already conflict-free.
+  /// taught by the SAME TEACHER, sharing the same course+level+period across
+  /// DIFFERENT classes, that genuinely overlap on days (e.g. a teacher's
+  /// several sections of the same course all landing on identical days by
+  /// mistake, same root cause as the locked-course case: the Allocator's
+  /// "Manual period, Auto days" combo pins both). Destaggers + unpins them
+  /// using the same day-search as `_applyLockToAssignments`, but scoped
+  /// strictly to that group's own members — it never relocates anything
+  /// from a different period, and never touches an already conflict-free
+  /// group. Teacher MUST be part of the key: several different teachers
+  /// legitimately teach the same course in the same period to their own
+  /// sections on the same days — that's not a clash, and grouping across
+  /// teachers previously caused this function to try to cram every section
+  /// of a course into a handful of day-windows meant for one teacher only.
   List<String> _destaggerPinnedDuplicates() {
     final groups = <String, List<int>>{};
     for (int i = 0; i < _assignments.length; i++) {
       final a = _assignments[i];
       if (a.autoAssigned) continue;
       groups
-          .putIfAbsent('${a.course.id}|${a.classModel.level.index}|${a.timeSlotId}', () => [])
+          .putIfAbsent(
+              '${a.teacher.id}|${a.course.id}|${a.classModel.level.index}|${a.timeSlotId}',
+              () => [])
           .add(i);
     }
 
