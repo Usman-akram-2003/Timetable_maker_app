@@ -299,6 +299,18 @@ GaOutput _runGA(GaInput input) {
     return input.timeSlotIntervals[ts]?['end'] ?? 0;
   });
 
+  // Per-assignment earliest allowed slot start (minutes) — the S1 "prefer
+  // early periods" soft score anchors to what's actually available for THIS
+  // level/shift, not a hardcoded clock time. A global 8am anchor would push
+  // every Bachelor course toward periods a later-starting shift never uses.
+  final earliestAllowedStart = List<int>.generate(n, (i) {
+    var best = 1 << 30;
+    for (final s in validSlotIdxs[i]) {
+      if (slotStart[s] < best) best = slotStart[s];
+    }
+    return best == 1 << 30 ? 480 : best;
+  });
+
   // ── Slot clock-overlap adjacency ────────────────────────────────────────────
   // CRITICAL for cross-level clash detection: a Bachelor 08:00-09:00 slot
   // clock-overlaps Intermediate 08:00-08:40 AND 08:40-09:20 even though they
@@ -446,7 +458,7 @@ GaOutput _runGA(GaInput input) {
 
   var bestScore = _fitnessC(pop.first, n, wDays, lockedStartDay, lockedSlotIdx, lockedRoomIdx,
       disciplineIds, sectionIds, courseIds, maxStarts, slotStart, slotEnd, creditHours, teacherIds, isElective, electiveGroupIds, dtGrid, numSlots,
-      phantomClassSets, phantomTeacherSets, customDays, touchedFlag, touchedKeys, overlapAdj);
+      phantomClassSets, phantomTeacherSets, customDays, touchedFlag, touchedKeys, overlapAdj, earliestAllowedStart);
 
   int gensRun    = 0;
   int stagnation = 0;
@@ -482,7 +494,7 @@ GaOutput _runGA(GaInput input) {
     for (int i = evalFrom; i < effectivePop; i++) {
       scores[i] = _fitnessC(pop[i], n, wDays, lockedStartDay, lockedSlotIdx, lockedRoomIdx,
           disciplineIds, sectionIds, courseIds, maxStarts, slotStart, slotEnd, creditHours, teacherIds, isElective, electiveGroupIds, dtGrid, numSlots,
-          phantomClassSets, phantomTeacherSets, customDays, touchedFlag, touchedKeys, overlapAdj);
+          phantomClassSets, phantomTeacherSets, customDays, touchedFlag, touchedKeys, overlapAdj, earliestAllowedStart);
     }
 
     // Find best
@@ -1325,6 +1337,7 @@ int _fitnessC(
     Uint8List touchedFlag,
     List<int> touchedKeys,
     List<List<int>> overlapAdj,
+    List<int> earliestAllowedStart,
     ) {
   int h1 = 0, h2 = 0, h3 = 0, s1 = 0;
 
@@ -1358,9 +1371,12 @@ int _fitnessC(
         dtGrid[key].add(i);
       }
     }
-    // S1 soft: prefer early periods
+    // S1 soft: prefer early periods, relative to the earliest slot THIS
+    // assignment could actually use (its level/shift's real start), not a
+    // hardcoded clock time — a later-starting shift must not be scored as
+    // if it were running late.
     final startMin = slotStart[ts];
-    final penalty  = (startMin - 480) ~/ 30;
+    final penalty  = (startMin - earliestAllowedStart[i]) ~/ 30;
     if (penalty > 0) s1 += penalty;
 
     // S2 soft: college PDF pattern — a course's day block anchors to a week

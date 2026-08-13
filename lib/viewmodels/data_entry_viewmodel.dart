@@ -2990,6 +2990,9 @@ class DataEntryViewModel extends ChangeNotifier {
     // after another move); the next Fix Now click retries everything.
     final unresolvable = <String>{};
     final slotById = {for (final t in _timeSlots) t.id: t};
+    // Deleted rooms leave stale roomId references on old assignments —
+    // ignore those as a "room clash" signal, matching countClashes().
+    final validRoomIds = {for (final r in _rooms) r.id};
     while (foundClash && iterations < 200) {
       iterations++;
       foundClash = false;
@@ -3098,7 +3101,10 @@ class DataEntryViewModel extends ChangeNotifier {
           }
 
           // Ã¢â€â‚¬Ã¢â€â‚¬ ROOM CLASH Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
-          if (a.hasRoom && b.hasRoom && a.roomId == b.roomId) {
+          if (a.hasRoom &&
+              b.hasRoom &&
+              a.roomId == b.roomId &&
+              validRoomIds.contains(a.roomId)) {
             if (isCombinedMatch(a, b)) continue;
             final pk = '${a.id}|${b.id}';
             if (unresolvable.contains(pk)) continue;
@@ -3804,6 +3810,9 @@ class DataEntryViewModel extends ChangeNotifier {
   Map<String, List<FixSuggestion>> suggestFixes({int workingDays = 6}) {
     final out = <String, List<FixSuggestion>>{};
     final combinedCourseIds = _combinedRules.map((r) => r.courseId).toSet();
+    // Deleted rooms leave stale roomId references on old assignments —
+    // ignore those as a "room clash" signal, matching countClashes().
+    final validRoomIds = {for (final r in _rooms) r.id};
     // Eligible movers: unpinned and not combined-protected.
     bool eligible(Assignment x) =>
         x.autoAssigned && !combinedCourseIds.contains(x.course.id);
@@ -3862,6 +3871,30 @@ class DataEntryViewModel extends ChangeNotifier {
           .toList()
         ..sort((x, y) => (load[x.id] ?? 0).compareTo(load[y.id] ?? 0));
       return cands.take(3).toList();
+    }
+
+    // Alternate teachers who could plausibly take over `a` at a DIFFERENT
+    // period (unlike [teacherCandidates], which only checks a's current
+    // slot). Prefer teachers already proven on this exact course elsewhere;
+    // fall back to same-department. Availability at any given period is
+    // checked by the caller via _findFreeDayAndSlot on a hypothetical copy.
+    List<Teacher> altTeacherCandidatesForMove(Assignment a) {
+      final provenOnCourse = _teachers
+          .where((t) =>
+              t.id != a.teacher.id &&
+              _assignments
+                  .any((x) => x.course.id == a.course.id && x.teacher.id == t.id))
+          .toList();
+      final dept = a.teacher.department.trim().toLowerCase();
+      final pool = provenOnCourse.isNotEmpty
+          ? provenOnCourse
+          : _teachers
+              .where((t) =>
+                  t.id != a.teacher.id &&
+                  t.department.trim().toLowerCase() == dept)
+              .toList();
+      pool.sort((x, y) => (load[x.id] ?? 0).compareTo(load[y.id] ?? 0));
+      return pool.take(5).toList();
     }
 
     // One free (period, day) cell per needed day — single-day cells can
@@ -4071,6 +4104,42 @@ class DataEntryViewModel extends ChangeNotifier {
           },
         );
 
+    FixSuggestion teacherReassignMove(String clash, Assignment a, Teacher t,
+            ({List<int> days, TimeSlot slot}) free) =>
+        FixSuggestion(
+          clash: clash,
+          description:
+              'Reassign "${label(a)}" to ${t.name} and move it to '
+              '${cellsStr(free.days, free.slot)} — ${a.teacher.name} has no '
+              'free block for this anywhere else, but ${t.name} does.',
+          apply: () {
+            final i = _assignments.indexWhere((x) => x.id == a.id);
+            if (i == -1) return 'Not applied: ${label(a)} changed meanwhile.';
+            final cur = _assignments[i];
+            if (!cur.autoAssigned) {
+              return 'Not applied: ${label(a)} is a manual allocation.';
+            }
+            final probe = cur.copyWith(teacher: t);
+            final fresh = _findFreeDayAndSlot(probe,
+                excludeAssignmentId: cur.id, maxDay: workingDays);
+            if (fresh == null) {
+              return 'Not applied: no free block for ${t.name} any more.';
+            }
+            _assignments[i] = cur.copyWith(
+              id: _uid(),
+              teacher: t,
+              timeSlotId: fresh.slot.id,
+              startSlot: fresh.days.first,
+              duration: fresh.days.length,
+              customDays: const [],
+            );
+            notifyListeners();
+            _saveData();
+            return 'Done: ${label(cur)} now taught by ${t.name} at '
+                '${cellsStr(fresh.days, fresh.slot)}.';
+          },
+        );
+
     void addFallbacks(
         String clash, List<FixSuggestion> sug, List<Assignment> cards) {
       if (sug.isNotEmpty) return;
@@ -4091,6 +4160,22 @@ class DataEntryViewModel extends ChangeNotifier {
         if (partner != null) {
           sug.add(pairSwap(clash, card, partner));
           return;
+        }
+      }
+      // Last resort: the card's own teacher has no free block anywhere, but
+      // an alternate qualified teacher might — try each candidate until one
+      // actually opens up a slot (probed via a hypothetical teacher swap,
+      // no shared logic duplicated with Fix Now's own search).
+      for (final card
+          in cards.where((x) => eligible(x) && _lockedSlotIdFor(x) == null)) {
+        for (final t in altTeacherCandidatesForMove(card)) {
+          final probe = card.copyWith(teacher: t);
+          final free = _findFreeDayAndSlot(probe,
+              excludeAssignmentId: card.id, maxDay: workingDays);
+          if (free != null) {
+            sug.add(teacherReassignMove(clash, card, t, free));
+            return;
+          }
         }
       }
     }
@@ -4161,7 +4246,10 @@ class DataEntryViewModel extends ChangeNotifier {
           }
           addFallbacks(clash, sug, ordered);
           out[clash] = sug;
-        } else if (a.hasRoom && b.hasRoom && a.roomId == b.roomId) {
+        } else if (a.hasRoom &&
+            b.hasRoom &&
+            a.roomId == b.roomId &&
+            validRoomIds.contains(a.roomId)) {
           final roomName =
               _rooms.where((r) => r.id == a.roomId).firstOrNull?.name ??
                   a.roomId;
