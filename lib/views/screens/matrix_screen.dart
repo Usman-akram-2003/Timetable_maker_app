@@ -433,9 +433,23 @@ class _MatrixScreenState extends State<MatrixScreen>
                               if (mounted) {
                                 messenger.showSnackBar(SnackBar(
                                   duration: const Duration(seconds: 5),
-                                  content: Text(
-                                    msgs.isEmpty ? 'No clashes to fix.' : msgs.map((x) => '• $x').join('\n'),
-                                    style: GoogleFonts.plusJakartaSans(color: Colors.white, fontSize: 12),
+                                  content: Row(
+                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    children: [
+                                      Expanded(
+                                        child: Text(
+                                          msgs.isEmpty ? 'No clashes to fix.' : msgs.map((x) => '• $x').join('\n'),
+                                          style: GoogleFonts.plusJakartaSans(color: Colors.white, fontSize: 12),
+                                        ),
+                                      ),
+                                      GestureDetector(
+                                        onTap: () => messenger.hideCurrentSnackBar(),
+                                        child: const Padding(
+                                          padding: EdgeInsets.only(left: 8),
+                                          child: Icon(Icons.close, color: Colors.white, size: 18),
+                                        ),
+                                      ),
+                                    ],
                                   ),
                                   backgroundColor: msgs.isEmpty ? AppTheme.accentTeal : AppTheme.error,
                                   behavior: SnackBarBehavior.floating,

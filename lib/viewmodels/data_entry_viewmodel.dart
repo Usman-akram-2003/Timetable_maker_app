@@ -50,6 +50,16 @@ class DataEntryViewModel extends ChangeNotifier {
   StreamSubscription? _sub;
   bool _isLoading = true;
 
+  // Set for the duration of fixTeacherClashes(). While true, incoming
+  // Firestore snapshots are not applied — fixTeacherClashes yields the UI
+  // thread between passes, and a concurrent edit's server-confirmed echo
+  // landing mid-run would otherwise clobber _assignments out from under it
+  // (the existing hasPendingWrites guard only skips the LOCAL echo of a
+  // write, not a real round-trip). Any edit made elsewhere during the run
+  // is already reflected in _assignments directly (mutations apply locally
+  // before they're persisted), so skipping the snapshot here loses nothing.
+  bool _isFixing = false;
+
   // Ã¢â€â‚¬Ã¢â€â‚¬ Friday Short Day setting (pushed from SettingsViewModel) Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
   bool _fridayShortDay = false;
   int _fridayMaxPeriod = 3;
@@ -776,6 +786,9 @@ class DataEntryViewModel extends ChangeNotifier {
       // here would leave the app permanently stuck showing no data, even
       // though the locally cached document content itself is fine.
       if (snapshot.metadata.hasPendingWrites && _hasLoadedData) {
+        return;
+      }
+      if (_isFixing) {
         return;
       }
 
@@ -2566,6 +2579,8 @@ class DataEntryViewModel extends ChangeNotifier {
 
   Future<List<String>> fixTeacherClashes({int workingDays = 6}) async {
     final messages = <String>[];
+    _isFixing = true;
+    try {
     // Pass -1: re-join previously split courses before clash-fixing — fewer,
     // whole records for the fixer to place, and the split damage is undone.
     messages.addAll(mergeSplitCourses(workingDays: workingDays));
@@ -2783,212 +2798,14 @@ class DataEntryViewModel extends ChangeNotifier {
         }
       }
 
-      // Strategy 4: Cascade Chain Move — the "sliding puzzle" approach.
-      // When every slot is blocked, find which auto-assigned course is
-      // blocking the best candidate slot, move THAT course to a free spot
-      // first, then move the loser into the now-freed slot.
-      // We verify the total clash count strictly decreases before committing,
-      // so this can never make things worse.
-      {
-        final loserDays = loser.occupiedSlots.toList()..sort();
-        final shiftAllowed = effectiveAllowedSlotsForClass(loser.classModel.id, workingDays);
-        final clashBefore4 = countClashes();
-
-
-        for (final candidate in _timeSlots.where((t) =>
-            t.level == loser.classModel.level &&
-            t.id != loser.timeSlotId &&
-            (lockedTs == null || t.id == lockedTs) &&
-            (shiftAllowed == null || shiftAllowed.contains(t.id)))) {
-
-          // Find all auto-assigned courses blocking loser from entering candidate+loserDays
-          for (int bi = 0; bi < _assignments.length; bi++) {
-            if (bi == loserIdx) continue;
-            final blocker = _assignments[bi];
-            if (!blocker.autoAssigned) continue; // never cascade-move pinned
-            // Never cascade-move a lock-bound course out of its locked slot.
-            if (_lockedSlotIdFor(blocker) != null) continue;
-            final bSlot = _timeSlots.where((t) => t.id == blocker.timeSlotId).firstOrNull;
-            if (bSlot == null) continue;
-            final bOverlapsCandidate = blocker.timeSlotId == candidate.id ||
-                _slotsOverlap(candidate, bSlot);
-            if (!bOverlapsCandidate) continue;
-            if (blocker.occupiedSlots.toSet().intersection(loserDays.toSet()).isEmpty) continue;
-            // blocker shares the candidate slot+days with loser — it must move first.
-
-            // Find a free slot+days for the blocker (excluding the candidate slot
-            // so we don't just swap them into a deadlock).
-            final bFree = _findFreeDayAndSlot(blocker,
-                excludeAssignmentId: blocker.id, maxDay: workingDays);
-            if (bFree == null) continue;
-            if (bFree.slot.id == candidate.id) continue; // wouldn't help
-
-            // Tentatively move blocker
-            final backupBlocker = blocker;
-            _assignments[bi] = blocker.copyWith(
-              id: _uid(),
-              timeSlotId: bFree.slot.id,
-              startSlot: bFree.days.first,
-              duration: blocker.duration,
-              customDays: bFree.days.length > 1 &&
-                      bFree.days.last - bFree.days.first + 1 == bFree.days.length
-                  ? []
-                  : bFree.days,
-            );
-
-            // Now check if loser fits in candidate+loserDays
-            if (_areDaysFreeInSlot(loserDays, candidate, loser.teacher.id,
-                loser.classModel.id, loser.roomId, loser.id)) {
-              // Tentatively move loser
-              final backupLoser = _assignments[loserIdx];
-              _assignments[loserIdx] = loser.copyWith(
-                id: _uid(),
-                timeSlotId: candidate.id,
-                startSlot: loserDays.first,
-                duration: origDuration,
-                customDays: loserDays.length == origDuration &&
-                        loserDays.last - loserDays.first + 1 == origDuration
-                    ? []
-                    : loserDays,
-              );
-              // Only commit if overall clashes strictly decreased
-              if (countClashes() < clashBefore4) {
-                messages.add(
-                    '[$label] Chain: moved "${blocker.course.code}" (${blocker.classModel.shortCode}) '
-                    '→ ${bFree.slot.shortLabel} to free space for '
-                    '"${loser.course.code}" (${loser.classModel.shortCode})');
-                return true;
-              }
-              // Revert loser move — this chain didn't help
-              _assignments[loserIdx] = backupLoser;
-            }
-            // Revert blocker move
-            _assignments[bi] = backupBlocker;
-          }
-        }
-      }
-
-      // Strategy 5: Exhaustive day-shift across all valid slots.
-      // Try every possible contiguous day block (not just the loser's current
-      // days) in every allowed slot. This catches cases where a simple day
-      // slide within the existing slot fails but another slot+day combo works.
-      {
-        final shiftAllowed = effectiveAllowedSlotsForClass(loser.classModel.id, workingDays);
-        for (final candidate in _timeSlots.where((t) =>
-            t.level == loser.classModel.level &&
-            (lockedTs == null || t.id == lockedTs) &&
-            (shiftAllowed == null || shiftAllowed.contains(t.id)))) {
-          for (int sd = 1; sd <= workingDays - origDuration + 1; sd++) {
-            final tryDays = List.generate(origDuration, (k) => sd + k);
-            // Skip identical to current position
-            final currentDays = loser.occupiedSlots.toList()..sort();
-            if (candidate.id == loser.timeSlotId && tryDays.join() == currentDays.join()) {
-              continue;
-            }
-            if (_areDaysFreeInSlot(tryDays, candidate, loser.teacher.id,
-                loser.classModel.id, loser.roomId, loser.id)) {
-              _assignments[loserIdx] = loser.copyWith(
-                id: _uid(),
-                timeSlotId: candidate.id,
-                startSlot: tryDays.first,
-                duration: origDuration,
-                customDays: tryDays.last - tryDays.first + 1 == origDuration ? [] : tryDays,
-              );
-              messages.add(
-                  '[$label] Exhaustive: moved "${loser.course.code}" (${loser.classModel.shortCode}) '
-                  'to ${candidate.shortLabel} Days ${tryDays.map((d) => _dayNames[d - 1]).join(",")} '
-                  '(resolving clash with "$winnerCode")');
-              return true;
-            }
-          }
-        }
-      }
-
-      // Strategy 6: N-Way Cyclic Swap (3-node round-robin).
-      // When a direct swap (Strategy 3) can't find a willing partner, we look
-      // for a THIRD assignment C such that:
-      //   • Loser fits in C's slot+days (C's spot becomes Loser's new home)
-      //   • C fits in a third open slot
-      //   • The net result strictly reduces countClashes()
-      // All shift/credit-hour/pinning rules are enforced identically to S3.
-      {
-        final loserDays  = loser.occupiedSlots.toList()..sort();
-        final loserSlot  = _timeSlots.where((t) => t.id == loser.timeSlotId).firstOrNull;
-        final loserShift = effectiveAllowedSlotsForClass(loser.classModel.id, workingDays);
-        if (loserSlot != null) {
-          final clashBefore6 = countClashes();
-          bool found6 = false;
-          // Iterate over all candidate "B" slots loser could move into
-          for (final bSlot in _timeSlots.where((t) =>
-              t.level == loser.classModel.level &&
-              t.id != loser.timeSlotId &&
-              (lockedTs == null || t.id == lockedTs) &&
-              (loserShift == null || loserShift.contains(t.id)))) {
-            if (found6) break;
-            // Check: loser fits in bSlot+loserDays?
-            if (!_areDaysFreeInSlot(loserDays, bSlot, loser.teacher.id,
-                loser.classModel.id, loser.roomId, loser.id)) { continue; }
-            // bSlot is free for loser. Find an occupant C in bSlot that needs
-            // to move and that has a free home somewhere else.
-            for (int ci = 0; ci < _assignments.length; ci++) {
-              if (ci == loserIdx) continue;
-              final c = _assignments[ci];
-              if (!c.autoAssigned) continue;       // never move pinned
-              // Never cycle a lock-bound course out of its locked slot.
-              if (_lockedSlotIdFor(c) != null) continue;
-              if (c.timeSlotId != bSlot.id) continue;
-              final cDays = c.occupiedSlots.toList()..sort();
-              // c is in bSlot — see if c's days conflict with loserDays
-              if (!cDays.toSet().intersection(loserDays.toSet()).isNotEmpty) continue;
-              // c IS the occupant blocking loser. Find a free home for c.
-              final cShift = effectiveAllowedSlotsForClass(c.classModel.id, workingDays);
-              for (final cDest in _timeSlots.where((t) =>
-                  t.level == c.classModel.level &&
-                  t.id != c.timeSlotId &&
-                  t.id != loser.timeSlotId &&
-                  (cShift == null || cShift.contains(t.id)))) {
-                if (_areDaysFreeInSlot(cDays, cDest, c.teacher.id,
-                    c.classModel.id, c.roomId, c.id)) {
-                  // Tentatively execute the cycle: loser→bSlot, c→cDest
-                  final backupLoser = _assignments[loserIdx];
-                  final backupC     = _assignments[ci];
-                  _assignments[loserIdx] = loser.copyWith(
-                    id: _uid(),
-                    timeSlotId: bSlot.id,
-                    startSlot: loserDays.first,
-                    duration: origDuration,
-                    customDays: loserDays.last - loserDays.first + 1 == origDuration
-                        ? [] : loserDays,
-                  );
-                  _assignments[ci] = c.copyWith(
-                    id: _uid(),
-                    timeSlotId: cDest.id,
-                    startSlot: cDays.first,
-                    duration: c.duration,   // preserve credit hours
-                    customDays: cDays.last - cDays.first + 1 == c.duration
-                        ? [] : cDays,
-                  );
-                  if (countClashes() < clashBefore6) {
-                    messages.add(
-                        '[$label] CyclicSwap: "${loser.course.code}" '
-                        '(${loser.classModel.shortCode}) → ${bSlot.shortLabel}, '
-                        '"${c.course.code}" (${c.classModel.shortCode}) → '
-                        '${cDest.shortLabel}');
-                    found6 = true;
-                    break;
-                  }
-                  // Revert — cycle didn't help
-                  _assignments[loserIdx] = backupLoser;
-                  _assignments[ci]       = backupC;
-                }
-                if (found6) break;
-              }
-              if (found6) break;
-            }
-          }
-          if (found6) return true;
-        }
-      }
+      // ponytail: Strategies 4 (Cascade Chain Move), 5 (Exhaustive day-shift,
+      // fully redundant with Strategy 2's _findFreeDayAndSlot search space)
+      // and 6 (N-Way Cyclic Swap) were removed 2026-08-13 — they only ever
+      // ran after S0-S3 already failed, and were the dominant cost on
+      // structurally-stuck clashes (S4/S6 each call countClashes(), an O(n)
+      // full rescan, inside nested loops). If a future case needs them, they
+      // covered: moving a third blocking course out of the way first (S4),
+      // and 3-way slot cycling when no direct swap partner exists (S6).
 
       messages.add(lockedTs != null
           ? '[$label] "${loser.course.code}" (${loser.classModel.shortCode}) is '
@@ -3853,6 +3670,9 @@ class DataEntryViewModel extends ChangeNotifier {
     // other clashes elsewhere keep the loop going — dedupe so the summary
     // dialog doesn't show the same "could not relocate" line repeatedly.
     return messages.toSet().toList();
+    } finally {
+      _isFixing = false;
+    }
   }
 
   /// What-if engine: for every current clash, propose concrete DATA changes
