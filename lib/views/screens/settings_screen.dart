@@ -914,10 +914,40 @@ class _TimeSlotLocksSectionState extends State<_TimeSlotLocksSection> {
         Divider(color: context._bd, height: 1),
         const SizedBox(height: 16),
         
-        Text('Active Locks', style: GoogleFonts.plusJakartaSans(
-            fontWeight: FontWeight.w700, fontSize: 13, color: context._tp)),
+        Row(
+          children: [
+            Text('Active Locks', style: GoogleFonts.plusJakartaSans(
+                fontWeight: FontWeight.w700, fontSize: 13, color: context._tp)),
+            const Spacer(),
+            TextButton.icon(
+              onPressed: () {
+                final log = vm.resyncTimeSlotLocks();
+                ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+                  content: Text(
+                    log.isEmpty
+                        ? 'Nothing to fix — no locked or duplicate-pinned courses found.'
+                        : '${log.length} card${log.length == 1 ? '' : 's'} unpinned and moved back onto a clash-free day — run Fix Now / GA to finalise.',
+                    style: GoogleFonts.plusJakartaSans(color: Colors.white, fontWeight: FontWeight.w600, fontSize: 12),
+                  ),
+                  backgroundColor: log.isEmpty ? AppTheme.accentTeal : AppTheme.accentAmber,
+                  behavior: SnackBarBehavior.floating,
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                ));
+              },
+              icon: const Icon(Icons.sync_rounded, size: 15),
+              label: Text('Fix Pinned Duplicates', style: GoogleFonts.plusJakartaSans(fontWeight: FontWeight.w700, fontSize: 12)),
+            ),
+          ],
+        ),
+        Text(
+          'Re-applies your locks, and — for ANY course, not just locked ones — '
+          'finds a teacher\'s pinned sections of the same course in the same '
+          'period that landed on identical days by mistake, and spreads them '
+          'onto different days automatically.',
+          style: GoogleFonts.plusJakartaSans(fontSize: 11, color: context._ts, height: 1.4),
+        ),
         const SizedBox(height: 12),
-        
+
         if (vm.timeSlotLocks.isEmpty)
           Text('No locks configured. The GA will randomly assign all slots.',
               style: GoogleFonts.plusJakartaSans(fontSize: 12, color: context._ts))

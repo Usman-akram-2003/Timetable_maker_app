@@ -1137,15 +1137,115 @@ class DataEntryViewModel extends ChangeNotifier {
   /// Returns a log of changes made.
   List<String> addTimeSlotLock(TimeSlotLock lock) {
     _timeSlotLocks.add(lock);
-    final log = <String>[];
+    final log = _applyLockToAssignments(lock);
+    notifyListeners();
+    _saveData();
+    return log;
+  }
 
+  /// Re-applies every existing Time Slot Lock to the current assignments.
+  /// Covers drift where a card matching a lock got re-pinned (e.g. edited
+  /// later via the Allocator's manual-period form, which pins BOTH slot and
+  /// days even when only the period was meant to be fixed) — this moves it
+  /// back to the locked slot and unpins it so Fix Now/GA can arrange its
+  /// days again, exactly like adding the lock fresh would.
+  List<String> resyncTimeSlotLocks() {
+    final log = <String>[];
+    for (final lock in _timeSlotLocks) {
+      log.addAll(_applyLockToAssignments(lock));
+    }
+    log.addAll(_destaggerPinnedDuplicates());
+    if (log.isNotEmpty) {
+      notifyListeners();
+      _saveData();
+    }
+    return log;
+  }
+
+  /// Global version of the same fix — not dependent on a Time Slot Lock
+  /// existing. Finds any group of pinned (autoAssigned:false) assignments
+  /// that share the same course+level+period across DIFFERENT classes and
+  /// genuinely overlap on days (e.g. a teacher's several sections of the
+  /// same course all landing on identical days by mistake, same root cause
+  /// as the locked-course case: the Allocator's "Manual period, Auto days"
+  /// combo pins both). Destaggers + unpins them using the same day-search
+  /// as `_applyLockToAssignments`, but scoped strictly to that group's own
+  /// members — it never relocates anything from a different period, and
+  /// never touches a group that's already conflict-free.
+  List<String> _destaggerPinnedDuplicates() {
+    final groups = <String, List<int>>{};
+    for (int i = 0; i < _assignments.length; i++) {
+      final a = _assignments[i];
+      if (a.autoAssigned) continue;
+      groups
+          .putIfAbsent('${a.course.id}|${a.classModel.level.index}|${a.timeSlotId}', () => [])
+          .add(i);
+    }
+
+    final log = <String>[];
+    for (final idxs in groups.values) {
+      if (idxs.length < 2) continue;
+      // Same class appearing twice in one period is a different problem
+      // (a real duplicate entry) — leave it for the user to resolve.
+      final classIds = idxs.map((i) => _assignments[i].classModel.id).toSet();
+      if (classIds.length != idxs.length) continue;
+
+      var hasOverlap = false;
+      for (int x = 0; x < idxs.length && !hasOverlap; x++) {
+        final dx = _assignments[idxs[x]].occupiedSlots.toSet();
+        for (int y = x + 1; y < idxs.length; y++) {
+          if (dx.intersection(_assignments[idxs[y]].occupiedSlots.toSet()).isNotEmpty) {
+            hasOverlap = true;
+            break;
+          }
+        }
+      }
+      if (!hasOverlap) continue;
+
+      final targetSlot =
+          _timeSlots.where((t) => t.id == _assignments[idxs.first].timeSlotId).firstOrNull;
+      if (targetSlot == null) continue;
+
+      for (final i in idxs) {
+        final a = _assignments[i];
+        final ownDays = a.occupiedSlots;
+        final dur = ownDays.length.clamp(1, 6);
+        List<int>? block;
+        if (_areDaysFreeInSlot(
+            ownDays, targetSlot, a.teacher.id, a.classModel.id, a.roomId, a.id)) {
+          block = ownDays;
+        } else {
+          for (int start = 1; start + dur - 1 <= 6; start++) {
+            final days = List<int>.generate(dur, (k) => start + k);
+            if (_areDaysFreeInSlot(
+                days, targetSlot, a.teacher.id, a.classModel.id, a.roomId, a.id)) {
+              block = days;
+              break;
+            }
+          }
+        }
+        final keepOwnDays = block == null || identical(block, ownDays);
+        _assignments[i] = keepOwnDays
+            ? a.copyWith(timeSlotId: targetSlot.id, autoAssigned: true)
+            : a.copyWith(
+                timeSlotId: targetSlot.id,
+                startSlot: block.first,
+                duration: block.length,
+                customDays: const [],
+                autoAssigned: true,
+              );
+        log.add('[Destagger] ${a.classModel.shortCode}/${a.course.code} '
+            'unpinned within ${targetSlot.shortLabel} — run Fix Now / GA to finalise');
+      }
+    }
+    return log;
+  }
+
+  List<String> _applyLockToAssignments(TimeSlotLock lock) {
+    final log = <String>[];
     final targetSlot =
         _timeSlots.where((t) => t.id == lock.timeSlotId).firstOrNull;
-    if (targetSlot == null) {
-      _saveData();
-      notifyListeners();
-      return log;
-    }
+    if (targetSlot == null) return log;
 
     for (int i = 0; i < _assignments.length; i++) {
       final a = _assignments[i];
@@ -1205,9 +1305,6 @@ class DataEntryViewModel extends ChangeNotifier {
       log.add(
           'Moved ${a.classModel.shortCode}/${a.course.code} to ${lock.timeSlotLabel} — run GA to finalise');
     }
-
-    notifyListeners();
-    _saveData();
     return log;
   }
 
