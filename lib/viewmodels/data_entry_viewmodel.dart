@@ -2398,8 +2398,11 @@ class DataEntryViewModel extends ChangeNotifier {
     final messages = <String>[];
     final groups = <String, List<Assignment>>{};
     for (final a in _assignments) {
+      // Room is part of the key so pieces are only merged when they truly
+      // belong together — merging across rooms would silently drop
+      // whichever room the smaller piece was placed in.
       final key =
-          '${a.course.code.trim().toUpperCase()}|${a.classModel.id}|${a.teacher.id}';
+          '${a.course.code.trim().toUpperCase()}|${a.classModel.id}|${a.teacher.id}|${a.roomId ?? ''}';
       groups.putIfAbsent(key, () => []).add(a);
     }
     bool changed = false;
@@ -2937,6 +2940,10 @@ class DataEntryViewModel extends ChangeNotifier {
             }
             if (resolved) {
               foundClash = true;
+              // The schedule just changed — any pair marked unresolvable
+              // earlier in this run deserves a retry, since the ladder is
+              // cheap now (S0-S3 only, no countClashes() calls left in it).
+              unresolvable.clear();
               break outer;
             }
             unresolvable.add(pk);
@@ -2976,6 +2983,10 @@ class DataEntryViewModel extends ChangeNotifier {
             }
             if (resolved) {
               foundClash = true;
+              // The schedule just changed — any pair marked unresolvable
+              // earlier in this run deserves a retry, since the ladder is
+              // cheap now (S0-S3 only, no countClashes() calls left in it).
+              unresolvable.clear();
               break outer;
             }
             unresolvable.add(pk);
@@ -3007,6 +3018,10 @@ class DataEntryViewModel extends ChangeNotifier {
             }
             if (resolved) {
               foundClash = true;
+              // The schedule just changed — any pair marked unresolvable
+              // earlier in this run deserves a retry, since the ladder is
+              // cheap now (S0-S3 only, no countClashes() calls left in it).
+              unresolvable.clear();
               break outer;
             }
             unresolvable.add(pk);
