@@ -10,6 +10,7 @@ import '../../models/class_model.dart';
 import '../../models/education_level.dart';
 import '../../models/elective_group.dart';
 import '../../models/teacher.dart';
+import '../../models/time_slot.dart';
 import '../../app_theme.dart';
 import '../../utils/responsive.dart';
 
@@ -637,6 +638,33 @@ class _MatrixScreenState extends State<MatrixScreen>
                 const SizedBox(width: 8),
                 Text('Transfers & Swap', style: GoogleFonts.plusJakartaSans(
                     fontWeight: FontWeight.w800, color: const Color(0xFFF97316), fontSize: 13)),
+              ]),
+            ),
+          ),
+          const SizedBox(width: 12),
+
+          // ── Move Course button — relocate a single card to a different
+          // period, keeping teacher/days/room untouched. Separate from
+          // Transfers & Swap, which only exchanges teachers within a class.
+          GestureDetector(
+            onTap: () => showDialog(
+              context: ctx,
+              barrierDismissible: false,
+              builder: (_) => _MoveCourseDialog(dataVm: dataVm),
+            ),
+            child: AnimatedContainer(
+              duration: const Duration(milliseconds: 200),
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+              decoration: BoxDecoration(
+                color: AppTheme.accentCyan.withValues(alpha: .12),
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: AppTheme.accentCyan.withValues(alpha: .45)),
+              ),
+              child: Row(children: [
+                const Icon(Icons.open_with_rounded, color: AppTheme.accentCyan, size: 18),
+                const SizedBox(width: 8),
+                Text('Move Course', style: GoogleFonts.plusJakartaSans(
+                    fontWeight: FontWeight.w800, color: AppTheme.accentCyan, fontSize: 13)),
               ]),
             ),
           ),
@@ -2414,6 +2442,180 @@ class _InfoBox extends StatelessWidget {
         Expanded(child: Text(text, style: GoogleFonts.plusJakartaSans(
             color: color, fontWeight: FontWeight.w600, fontSize: 13))),
       ]));
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// Move Course Dialog — relocate one card to a different period. Pure move:
+// teacher, days, room and credit hours are untouched (see
+// DataEntryViewModel.moveAssignmentPeriod).
+// ════════════════════════════════════════════════════════════════════════════
+class _MoveCourseDialog extends StatefulWidget {
+  final DataEntryViewModel dataVm;
+  const _MoveCourseDialog({required this.dataVm});
+
+  @override
+  State<_MoveCourseDialog> createState() => _MoveCourseDialogState();
+}
+
+class _MoveCourseDialogState extends State<_MoveCourseDialog> {
+  String? _classId;
+  String? _assignmentId;
+  String? _targetSlotId;
+  String? _error;
+
+  DataEntryViewModel get _vm => widget.dataVm;
+
+  String _classLabel(ClassModel c) {
+    final prog = _vm.programs.where((p) => p.id == c.programId).firstOrNull?.name ?? '';
+    return prog.isEmpty ? c.name : '$prog-${c.name}';
+  }
+
+  List<Assignment> get _assignmentsForClass => _classId == null
+      ? const []
+      : (_vm.assignments.where((a) => a.classModel.id == _classId).toList()
+        ..sort((a, b) => a.course.name.compareTo(b.course.name)));
+
+  Assignment? get _selectedAssignment => _assignmentId == null
+      ? null
+      : _vm.assignments.where((a) => a.id == _assignmentId).firstOrNull;
+
+  List<TimeSlot> get _candidateSlots {
+    final a = _selectedAssignment;
+    if (a == null) return const [];
+    return _vm.timeSlots
+        .where((t) => t.level == a.classModel.level && t.id != a.timeSlotId)
+        .toList()
+      ..sort((x, y) => x.period.compareTo(y.period));
+  }
+
+  void _apply() {
+    final a = _selectedAssignment;
+    final slotId = _targetSlotId;
+    if (a == null || slotId == null) return;
+    setState(() => _error = null);
+    final err = _vm.moveAssignmentPeriod(a.id, slotId);
+    if (err != null) {
+      setState(() => _error = err);
+      return;
+    }
+    Navigator.of(context).pop();
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+      content: Row(children: [
+        const Icon(Icons.check_circle_rounded, color: Colors.white, size: 18),
+        const SizedBox(width: 10),
+        Expanded(child: Text(
+            'Moved "${a.course.name}" (${a.classModel.shortCode}) to '
+            '${_vm.timeSlots.where((t) => t.id == slotId).firstOrNull?.shortLabel ?? slotId}.',
+            style: GoogleFonts.plusJakartaSans(fontWeight: FontWeight.w600, color: Colors.white))),
+      ]),
+      backgroundColor: AppTheme.accentTeal,
+      behavior: SnackBarBehavior.floating,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+      duration: const Duration(seconds: 4),
+    ));
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final tp = isDark ? Colors.white : const Color(0xFF0F172A);
+    final ts = isDark ? const Color(0xFF94A3B8) : const Color(0xFF64748B);
+    final cd = isDark ? const Color(0xFF1E293B) : Colors.white;
+    final bd = isDark ? const Color(0xFF334155) : const Color(0xFFE2E8F0);
+    const cyan = AppTheme.accentCyan;
+
+    final classes = _vm.classes.toList()
+      ..sort((a, b) => _classLabel(a).compareTo(_classLabel(b)));
+
+    InputDecoration dec(String label) => InputDecoration(
+          labelText: label,
+          labelStyle: GoogleFonts.plusJakartaSans(fontSize: 12, color: ts),
+          filled: true,
+          fillColor: isDark ? const Color(0xFF0F172A) : const Color(0xFFF8FAFC),
+          border: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: BorderSide(color: bd)),
+          contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+        );
+
+    return Dialog(
+      backgroundColor: cd,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 480),
+        child: Padding(
+          padding: const EdgeInsets.all(24),
+          child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Row(children: [
+              Container(
+                width: 42, height: 42,
+                decoration: BoxDecoration(
+                  gradient: const LinearGradient(colors: [AppTheme.accentCyan, Color(0xFF0891B2)]),
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: const Icon(Icons.open_with_rounded, color: Colors.white, size: 22),
+              ),
+              const SizedBox(width: 14),
+              Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                Text('Move Course', style: GoogleFonts.plusJakartaSans(fontWeight: FontWeight.w800, fontSize: 18, color: tp)),
+                Text('Relocate one card to a different period — nothing else changes',
+                    style: GoogleFonts.plusJakartaSans(fontSize: 12, color: ts)),
+              ])),
+              IconButton(icon: Icon(Icons.close_rounded, color: ts), onPressed: () => Navigator.of(context).pop()),
+            ]),
+            const SizedBox(height: 20),
+            DropdownButtonFormField<String>(
+              decoration: dec('Class'),
+              initialValue: _classId,
+              isExpanded: true,
+              items: classes.map((c) => DropdownMenuItem(value: c.id,
+                  child: Text(_classLabel(c), style: GoogleFonts.plusJakartaSans(fontSize: 13)))).toList(),
+              onChanged: (v) => setState(() { _classId = v; _assignmentId = null; _targetSlotId = null; _error = null; }),
+            ),
+            const SizedBox(height: 12),
+            DropdownButtonFormField<String>(
+              decoration: dec('Course'),
+              initialValue: _assignmentId,
+              isExpanded: true,
+              items: _assignmentsForClass.map((a) => DropdownMenuItem(value: a.id,
+                  child: Text('${a.course.name} — currently ${a.slotLabel}',
+                      style: GoogleFonts.plusJakartaSans(fontSize: 13), overflow: TextOverflow.ellipsis))).toList(),
+              onChanged: (v) => setState(() { _assignmentId = v; _targetSlotId = null; _error = null; }),
+            ),
+            const SizedBox(height: 12),
+            DropdownButtonFormField<String>(
+              decoration: dec('Move to period'),
+              initialValue: _targetSlotId,
+              isExpanded: true,
+              items: _candidateSlots.map((t) => DropdownMenuItem(value: t.id,
+                  child: Text(t.shortLabel, style: GoogleFonts.plusJakartaSans(fontSize: 13)))).toList(),
+              onChanged: _selectedAssignment == null ? null : (v) => setState(() { _targetSlotId = v; _error = null; }),
+            ),
+            if (_error != null) ...[
+              const SizedBox(height: 12),
+              Container(
+                padding: const EdgeInsets.all(10),
+                decoration: BoxDecoration(color: AppTheme.error.withValues(alpha: .1), borderRadius: BorderRadius.circular(10)),
+                child: Row(children: [
+                  Icon(Icons.error_outline_rounded, size: 16, color: AppTheme.error),
+                  const SizedBox(width: 8),
+                  Expanded(child: Text(_error!, style: GoogleFonts.plusJakartaSans(fontSize: 12, color: AppTheme.error))),
+                ]),
+              ),
+            ],
+            const SizedBox(height: 20),
+            SizedBox(
+              width: double.infinity,
+              child: FilledButton(
+                onPressed: (_selectedAssignment != null && _targetSlotId != null) ? _apply : null,
+                style: FilledButton.styleFrom(backgroundColor: cyan, padding: const EdgeInsets.symmetric(vertical: 14),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12))),
+                child: Text('Move', style: GoogleFonts.plusJakartaSans(fontWeight: FontWeight.w800, color: Colors.white)),
+              ),
+            ),
+          ]),
+        ),
+      ),
+    );
+  }
 }
 
 // ════════════════════════════════════════════════════════════════════════════

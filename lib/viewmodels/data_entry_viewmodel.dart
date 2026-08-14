@@ -2386,6 +2386,10 @@ class DataEntryViewModel extends ChangeNotifier {
   bool _areDaysFreeInSlot(List<int> days, TimeSlot candidate, String teacherId,
       String classId, String? roomId, String? excludeId,
       {String? excludeId2}) {
+    // Deleted rooms leave stale roomId references on old assignments/electives
+    // — ignore those as a blocker, matching countClashes()'s validRoomIds guard.
+    final checkRoom =
+        roomId != null && _rooms.any((r) => r.id == roomId);
     for (final eg in _electiveGroups) {
       final egSlot = _timeSlots.where((t) => t.id == eg.timeSlotId).firstOrNull;
       if (egSlot == null || !_slotsOverlap(candidate, egSlot)) continue;
@@ -2393,7 +2397,7 @@ class DataEntryViewModel extends ChangeNotifier {
       if (!days.any(electiveOccupiedDays(eg).contains)) continue;
       if (eg.classIds.contains(classId)) return false;
       if (eg.entries.any((e) => e.teacherId == teacherId)) return false;
-      if (roomId != null && eg.entries.any((e) => e.roomId == roomId)) return false;
+      if (checkRoom && eg.entries.any((e) => e.roomId == roomId)) return false;
     }
     for (final day in days) {
       if (isFridayBlockedSlot(candidate, day)) return false;
@@ -2409,7 +2413,7 @@ class DataEntryViewModel extends ChangeNotifier {
         // Guard: assignments with no teacher never create a teacher clash.
         if (a.teacher.id.isNotEmpty && a.teacher.id == teacherId) { return false; }
         if (a.classModel.id == classId) { return false; }
-        if (roomId != null && a.hasRoom && a.roomId == roomId) { return false; }
+        if (checkRoom && a.hasRoom && a.roomId == roomId) { return false; }
       }
     }
     return true;
@@ -2450,6 +2454,42 @@ class DataEntryViewModel extends ChangeNotifier {
         }
       }
     }
+    return null;
+  }
+
+  /// Moves a single assignment to a different period, keeping its days,
+  /// teacher, room and credit hours exactly as they are — a pure card
+  /// relocation, nothing else changes. Returns null on success, or a
+  /// message explaining why the move was rejected.
+  String? moveAssignmentPeriod(String assignmentId, String newTimeSlotId,
+      {int workingDays = 6}) {
+    final i = _assignments.indexWhere((a) => a.id == assignmentId);
+    if (i == -1) return 'Assignment not found — the data may have changed.';
+    final a = _assignments[i];
+    if (!a.autoAssigned) {
+      return '"${a.course.code}" (${a.classModel.shortCode}) is a manual allocation — locked, not moved.';
+    }
+    if (_lockedSlotIdFor(a) != null) {
+      return '"${a.course.code}" (${a.classModel.shortCode}) is time-slot-locked — remove the lock first.';
+    }
+    final newSlot = _timeSlots.where((t) => t.id == newTimeSlotId).firstOrNull;
+    if (newSlot == null) return 'Target period not found.';
+    if (newSlot.level != a.classModel.level) {
+      return 'That period belongs to a different education level.';
+    }
+    final shiftAllowed =
+        effectiveAllowedSlotsForClass(a.classModel.id, workingDays);
+    if (shiftAllowed != null && !shiftAllowed.contains(newTimeSlotId)) {
+      return '"${a.classModel.shortCode}" isn\'t allowed in that period (shift restriction).';
+    }
+    if (!_areDaysFreeInSlot(a.occupiedSlots, newSlot, a.teacher.id,
+        a.classModel.id, a.roomId, a.id)) {
+      return 'That period isn\'t free — it clashes with an existing '
+          'assignment or elective on the same days.';
+    }
+    _assignments[i] = a.copyWith(id: _uid(), timeSlotId: newTimeSlotId);
+    notifyListeners();
+    _saveData();
     return null;
   }
 

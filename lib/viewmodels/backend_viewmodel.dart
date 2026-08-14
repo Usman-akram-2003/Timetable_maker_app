@@ -545,6 +545,64 @@ class BackendViewModel extends ChangeNotifier {
             : gaOutput;
       }
 
+      // ── 5b. Partial-apply: isolate which independent parts of the schedule
+      // are actually clash-free, instead of an all-or-nothing gate. Two
+      // assignments can only ever clash via a shared teacher or a shared
+      // class+section (the same predicate countClashesMap uses for H1/H3) —
+      // so group assignments into clusters by that predicate, then any
+      // cluster with zero clashing genes is safe to write regardless of
+      // what's still stuck elsewhere. Rooms are excluded from clustering
+      // deliberately: GA/CSP never move a room (locked_room_id is always a
+      // passthrough), so a gene's room is identical whether it ends up
+      // "applied" (chromosome position) or left at its original position —
+      // partial application can never create a new room clash either.
+      final n = gaInput.assignments.length;
+      final clashedIdx = <int>{};
+      if (output.chromosome.isNotEmpty) {
+        countClashesMap(output.chromosome, gaInput.assignments,
+            gaInput.timeSlotIntervals, workingDays,
+            electiveOccupancy: gaInput.electiveOccupancy,
+            clashedGeneIndices: clashedIdx);
+      }
+      final clusterParent = List<int>.generate(n, (i) => i);
+      int findCluster(int x) {
+        while (clusterParent[x] != x) {
+          clusterParent[x] = clusterParent[clusterParent[x]];
+          x = clusterParent[x];
+        }
+        return x;
+      }
+      void unionCluster(int a, int b) {
+        final ra = findCluster(a), rb = findCluster(b);
+        if (ra != rb) clusterParent[ra] = rb;
+      }
+      bool shareTeacherOrSection(int i, int j) {
+        final ai = gaInput.assignments[i], aj = gaInput.assignments[j];
+        final ti = ai['teacher_id']?.toString() ?? '';
+        final tj = aj['teacher_id']?.toString() ?? '';
+        if (ti.isNotEmpty && ti == tj) return true;
+        final sameSection = ai['discipline_id'] == aj['discipline_id'] &&
+            ai['section']       == aj['section'] &&
+            ai['course_id']     != aj['course_id'];
+        if (!sameSection) return false;
+        final egA = ai['elective_group_id']?.toString() ?? '';
+        if (ai['is_elective'] == true && aj['is_elective'] == true &&
+            egA.isNotEmpty && egA == aj['elective_group_id']) {
+          return false;
+        }
+        return true;
+      }
+      for (int i = 0; i < n; i++) {
+        for (int j = i + 1; j < n; j++) {
+          if (shareTeacherOrSection(i, j)) unionCluster(i, j);
+        }
+      }
+      final stuckClusters = clashedIdx.map(findCluster).toSet();
+      final safeChromosome = output.chromosome
+          .where((g) => !stuckClusters.contains(findCluster(g['assignment_idx'] as int)))
+          .toList();
+      final stuckCount = n - safeChromosome.length;
+
       // ── 6. Convert chromosome → Flutter Assignment objects ────────────────────
       final gaAssignments = _chromosomeToAssignments(
         chromosome: output.chromosome,
@@ -552,23 +610,35 @@ class BackendViewModel extends ChangeNotifier {
         timeSlots:  timeSlots,
         origIndicesMapping: origIndicesMapping,
       );
+      final safeGaAssignments = _chromosomeToAssignments(
+        chromosome: safeChromosome,
+        originals:  assignments,
+        timeSlots:  timeSlots,
+        origIndicesMapping: origIndicesMapping,
+      );
 
       // ── 7. Push into schedule & notify ────────────────────────────────────
-      // Only a CLASH-FREE result may be written back to the saved timetable.
-      // A best-effort fallback with clashes stays preview-only — it must never
-      // replace the user's data with a worse schedule.
-      final applyToData = output.hardClashes == 0;
+      // Every cluster in safeChromosome is independently verified clash-free
+      // (see 5b) — those get written. Anything still stuck stays exactly
+      // where it was; it's surfaced via output.message/breakdown, never
+      // silently applied.
+      final applyToData = safeGaAssignments.isNotEmpty;
       // Detect pinned-vs-pinned clashes before building the result.
       // This is purely diagnostic — it never changes any assignment.
       final pinnedClashMessages = _detectPinnedClashes(
           assignments, timeSlots, workingDays);
 
       _lastResult = GaScheduleResult(
-        message: applyToData || dataVm == null
+        message: output.hardClashes == 0 || dataVm == null
             ? output.message
-            : '${output.message}\n'
-                'NOT applied to your timetable (result still has clashes) — '
-                'preview only. Fix the bottleneck above and re-run.',
+            : stuckCount > 0 && applyToData
+                ? '${output.message}\n'
+                    'Applied to ${safeGaAssignments.length} of $n assignments — '
+                    '$stuckCount assignment(s) in a still-unresolved cluster '
+                    'were left unchanged.'
+                : '${output.message}\n'
+                    'NOT applied to your timetable (result still has clashes) — '
+                    'preview only. Fix the bottleneck above and re-run.',
         totalClashes:  output.hardClashes,
         generationsRun: output.generationsRun,
         breakdown:     output.breakdown,
@@ -585,7 +655,7 @@ class BackendViewModel extends ChangeNotifier {
         );
         // Write GA-optimised positions back into the main data so the matrix
         // (which reads dataVm.combinedAssignments) shows the fresh schedule.
-        if (applyToData) dataVm?.applyGaResults(gaAssignments);
+        if (applyToData) dataVm?.applyGaResults(safeGaAssignments);
       }
     } catch (e) {
       _errorMessage = 'Unexpected error: $e';

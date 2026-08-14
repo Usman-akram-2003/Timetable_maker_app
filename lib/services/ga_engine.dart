@@ -1294,7 +1294,8 @@ GaOutput _runGA(GaInput input) {
   });
 
   final bd    = countClashesMap(chromosome, input.assignments,
-      input.timeSlotIntervals, wDays);
+      input.timeSlotIntervals, wDays,
+      electiveOccupancy: input.electiveOccupancy);
   final total = bd['total_hard']!;
   final msg   = total == 0
       ? 'Clash-free schedule found in $gensRun generation(s) ✓'
@@ -1844,8 +1845,13 @@ Map<String, int> countClashesMap(
     List<Map<String, dynamic>> chromosome,
     List<Map<String, dynamic>> assignments,
     Map<String, Map<String, int>> intervals,
-    int wDays,
-    ) {
+    int wDays, {
+    List<Map<String, dynamic>> electiveOccupancy = const [],
+    // Populated (assignment_idx values, matching GaInput.assignments) with
+    // every gene involved in at least one hard clash — lets a caller isolate
+    // which part of a not-fully-clean schedule is actually safe to apply.
+    Set<int>? clashedGeneIndices,
+    }) {
   int h1 = 0, h2 = 0, h3 = 0, s1 = 0;
 
   // ── Soft penalty (unchanged) ────────────────────────────────────────────────
@@ -1920,14 +1926,17 @@ Map<String, int> countClashesMap(
 
           // Teacher clash
           final tid = ai2['teacher_id'] as String?;
-          if (tid != null && tid.isNotEmpty && tid == aj['teacher_id']) h1++;
+          final teacherClash = tid != null && tid.isNotEmpty && tid == aj['teacher_id'];
+          if (teacherClash) h1++;
 
           // Room clash
           final ri = gi['room_id'];
           final rj = gj['room_id'];
-          if (ri != null && rj != null && ri == rj) h2++;
+          final roomClash = ri != null && rj != null && ri == rj;
+          if (roomClash) h2++;
 
           // Section clash
+          bool sectionClash = false;
           if (ai2['discipline_id'] == aj['discipline_id'] &&
               ai2['section']       == aj['section']       &&
               ai2['course_id']     != aj['course_id']) {
@@ -1935,9 +1944,72 @@ Map<String, int> countClashesMap(
                 aj['is_elective'] == true &&
                 ai2['elective_group_id'] != null &&
                 ai2['elective_group_id'] == aj['elective_group_id'];
-            if (!sameElectiveGroup) h3++;
+            if (!sameElectiveGroup) { h3++; sectionClash = true; }
+          }
+          if (clashedGeneIndices != null && (teacherClash || roomClash || sectionClash)) {
+            clashedGeneIndices.add(gi['assignment_idx'] as int);
+            clashedGeneIndices.add(gj['assignment_idx'] as int);
           }
         }
+      }
+    }
+  }
+
+  // ── Hard clash vs. elective phantom occupancy ────────────────────────────
+  // Electives never appear as chromosome genes, so the pairwise scan above
+  // can't see them — without this, a schedule that seats a regular course
+  // on top of a class's own elective session gets reported as clash-free
+  // (this is what let a bad GA write pass the "0 hard clashes" save gate).
+  // Mirrors _fitnessC's phantom check so the reported count always matches
+  // what the search actually optimised against.
+  if (electiveOccupancy.isNotEmpty) {
+    final phantomClass   = <String, List<Set<String>>>{};
+    final phantomTeacher = <String, List<Set<String>>>{};
+    for (final occ in electiveOccupancy) {
+      final slotId = occ['slot_id']?.toString() ?? '';
+      if (slotId.isEmpty) continue;
+      final clsIds = ((occ['class_ids'] as List?) ?? const []).map((e) => e.toString()).toSet();
+      final tchIds = ((occ['teacher_ids'] as List?) ?? const []).map((e) => e.toString()).toSet();
+      final days = ((occ['days'] as List?) ?? const []).map((e) => (e as num).toInt()).toList();
+      for (final day in days) {
+        final key = '$slotId|$day';
+        phantomClass.putIfAbsent(key, () => []).add(clsIds);
+        phantomTeacher.putIfAbsent(key, () => []).add(tchIds);
+      }
+    }
+    for (int i = 0; i < chromosome.length; i++) {
+      final gene = chromosome[i];
+      final a = assignments[gene['assignment_idx'] as int];
+      final disciplineId = a['discipline_id'] as String?;
+      final teacherId = a['teacher_id'] as String?;
+      // One count per gene (matches the pairwise scan's "per pair, not per
+      // day" convention above) — a course sitting on 4 elective-occupied
+      // days is still a single clash to resolve, not four.
+      bool classHit = false, teacherHit = false;
+      for (final day in geneDaySet[i]) {
+        final key = '${geneTs[i]}|$day';
+        if (!classHit) {
+          final pCls = phantomClass[key];
+          if (pCls != null && disciplineId != null) {
+            for (final s in pCls) {
+              if (s.contains(disciplineId)) { classHit = true; break; }
+            }
+          }
+        }
+        if (!teacherHit) {
+          final pTch = phantomTeacher[key];
+          if (pTch != null && teacherId != null && teacherId.isNotEmpty) {
+            for (final s in pTch) {
+              if (s.contains(teacherId)) { teacherHit = true; break; }
+            }
+          }
+        }
+        if (classHit && teacherHit) break;
+      }
+      if (classHit) h3++;
+      if (teacherHit) h1++;
+      if (clashedGeneIndices != null && (classHit || teacherHit)) {
+        clashedGeneIndices.add(gene['assignment_idx'] as int);
       }
     }
   }

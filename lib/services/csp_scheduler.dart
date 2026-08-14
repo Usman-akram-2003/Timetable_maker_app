@@ -422,7 +422,8 @@ GaOutput _runCsp(GaInput input) {
       };
     });
 
-    final bd = countClashesMap(chromosome, input.assignments, input.timeSlotIntervals, wDays);
+    final bd = countClashesMap(chromosome, input.assignments, input.timeSlotIntervals, wDays,
+        electiveOccupancy: input.electiveOccupancy);
     // Room clashes (H2) are explicitly not CSP's concern — rooms are a pure
     // locked passthrough here (manual-only, per the Room Allocation UI) and
     // are never searched, so a pre-existing room double-booking inherited
