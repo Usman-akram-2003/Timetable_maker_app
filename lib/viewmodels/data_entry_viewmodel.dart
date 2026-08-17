@@ -1930,6 +1930,32 @@ class DataEntryViewModel extends ChangeNotifier {
     _saveData();
   }
 
+  /// Renumbers one level's periods to match actual chronological order.
+  /// addTimeSlot always appends (period = last + 1), so importing a file
+  /// whose periods partially reuse existing start times (e.g. a new
+  /// evening-shift period landing between two long-unused default slots)
+  /// leaves .period values that no longer reflect clock order — sort
+  /// callers throughout the app already rely on .period, and headers
+  /// display it directly ("P7" sitting between "P4" and "P5"), so this
+  /// keeps that invariant true instead of just working around it per call
+  /// site.
+  void renumberTimeSlotsChronologically(EducationLevel level) {
+    int mins(String t) {
+      final p = t.split(':');
+      if (p.length != 2) return 0;
+      return (int.tryParse(p[0]) ?? 0) * 60 + (int.tryParse(p[1]) ?? 0);
+    }
+
+    final levelSlots = _timeSlots.where((t) => t.level == level).toList()
+      ..sort((a, b) => mins(a.startTime).compareTo(mins(b.startTime)));
+    for (int i = 0; i < levelSlots.length; i++) {
+      final slotIdx = _timeSlots.indexOf(levelSlots[i]);
+      _timeSlots[slotIdx] = _timeSlots[slotIdx].copyWith(period: i + 1);
+    }
+    notifyListeners();
+    _saveData();
+  }
+
   void removeTimeSlot(String id) {
     final idx = _timeSlots.indexWhere((t) => t.id == id);
     if (idx == -1) return;
@@ -2206,6 +2232,7 @@ class DataEntryViewModel extends ChangeNotifier {
   }
 
   void clearAllData() {
+    _departments.clear();
     _teachers.clear();
     _courses.clear();
     _programs.clear();
@@ -2214,7 +2241,16 @@ class DataEntryViewModel extends ChangeNotifier {
     _timeSlots.clear();
     _timeSlots.addAll(TimeSlot.defaults(EducationLevel.intermediate));
     _timeSlots.addAll(TimeSlot.defaults(EducationLevel.bachelors));
+    _timeSlotLocks.clear();
     _assignments.clear();
+    _combinedRules.clear();
+    // Elective groups/entries reference teacher/course/class ids that are
+    // being wiped above — leaving them behind made combinedAssignments()
+    // synthesize phantom assignments that all fell back to the same empty
+    // placeholder class id, so they all "clashed" with each other even
+    // though the schedule was empty (e.g. reported "5899 clashes found").
+    _electiveGroups.clear();
+    _shiftRules.clear();
     notifyListeners();
     _saveData();
   }

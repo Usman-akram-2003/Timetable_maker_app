@@ -60,3 +60,11 @@ manual_pins_backup_*.txt
 test_xlsx/
 lib\ (3).zip
 26.0.1
+
+# Batch-import tool: live-data backups and any service-account key that
+# might get dropped here must never be committed.
+tool/batch_import/backups/
+tool/batch_import/node/node_modules/
+tool/batch_import/**/*.json
+!tool/batch_import/node/package.json
+!tool/batch_import/node/package-lock.json

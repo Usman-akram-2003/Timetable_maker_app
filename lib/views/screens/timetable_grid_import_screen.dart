@@ -3,8 +3,13 @@ import 'package:provider/provider.dart';
 import 'package:google_fonts/google_fonts.dart';
 import '../../viewmodels/data_entry_viewmodel.dart';
 import '../../viewmodels/allocator_viewmodel.dart';
+import '../../viewmodels/settings_viewmodel.dart';
 import '../../models/education_level.dart';
+import '../../models/time_slot.dart';
 import '../../models/room.dart';
+import '../../models/elective_group.dart';
+import '../../models/teacher.dart';
+import '../../models/course.dart';
 import '../../services/timetable_grid_import_service.dart';
 import '../../app_theme.dart';
 
@@ -27,19 +32,24 @@ class _TimetableGridImportScreenState extends State<TimetableGridImportScreen> {
 
   TimetableGridImportResult? _result;
   String _error = '';
+  // Auto-detected level can be wrong (bare department names like
+  // "Chemistry" carry no BS/FA-style signal at all) — null means "use
+  // _result!.isIntermediate", non-null means the user overrode it.
+  bool? _levelOverride;
+  bool get _effectiveIsIntermediate => _levelOverride ?? _result!.isIntermediate;
 
   // ── Actions ──────────────────────────────────────────────────────────────
 
   Future<void> _pickFile() async {
     setState(() { _error = ''; _step = 0; _result = null; });
     try {
-      final r = await TimetableGridImportService.pickAndParse(
+      final r = await pickAndParseTimetableFile(
         onProgress: (p, msg) {
           if (mounted) setState(() { _progress = p; _progressMsg = msg; });
         },
       );
       if (r == null) return; // user cancelled
-      if (mounted) setState(() { _result = r; _step = 1; });
+      if (mounted) setState(() { _result = r; _step = 1; _levelOverride = null; });
     } catch (e) {
       if (mounted) setState(() { _error = e.toString(); });
     }
@@ -53,6 +63,12 @@ class _TimetableGridImportScreenState extends State<TimetableGridImportScreen> {
 
     final dataVm  = context.read<DataEntryViewModel>();
     final allocVm = context.read<AllocatorViewModel>();
+    // A grid cell only records WHO teaches WHAT at WHICH period — the source
+    // sheet has no day column at all. The college convention (confirmed
+    // against real GGC timetables) is that a course occupies its period
+    // every working day unless split, so that's the correct default —
+    // not the placeholder 1-day/1-credit-hour every import used to get.
+    final workingDays = context.read<SettingsViewModel>().workingDays;
 
     try {
       await Future.delayed(const Duration(milliseconds: 50));
@@ -70,7 +86,7 @@ class _TimetableGridImportScreenState extends State<TimetableGridImportScreen> {
 
       // ── 1: Time Slots ─────────────────────────────────────────────────────
       if (_createTimeslots) {
-        final level = result.isIntermediate
+        final level = _effectiveIsIntermediate
             ? EducationLevel.intermediate
             : EducationLevel.bachelors;
 
@@ -85,18 +101,42 @@ class _TimetableGridImportScreenState extends State<TimetableGridImportScreen> {
             dataVm.addTimeSlot(p.startTime, p.endTime, level);
           }
         }
+
+        // Drop any OTHER slot at this level this file doesn't need, as
+        // long as nothing actually uses it — typically the app's generic
+        // Clear-Data defaults, once a real file's own periods replace
+        // them. Never touches a slot with real assignments/electives on
+        // it, so an unrelated day-shift file already imported at the same
+        // level is left alone.
+        final neededStarts = result.periods.map((p) => p.startTime).toSet();
+        final staleSlots = dataVm.timeSlots.where((ts) =>
+            ts.level == level &&
+            !neededStarts.contains(ts.startTime) &&
+            !dataVm.assignments.any((a) => a.timeSlotId == ts.id) &&
+            !dataVm.electiveGroups.any((eg) => eg.timeSlotId == ts.id)).toList();
+        for (final ts in staleSlots) {
+          dataVm.removeTimeSlot(ts.id);
+        }
+
+        // addTimeSlot always appends (next period number = last + 1), so a
+        // newly-created period that starts earlier in the day than some
+        // already-existing slot at this level leaves period numbers out of
+        // clock order (e.g. a new 11:30 slot appended after an unrelated
+        // unused 13:00 default). Re-sync so P1..Pn always match real time.
+        dataVm.renumberTimeSlotsChronologically(level);
       }
 
       _updateProgress(0.15, 'Registering teachers…');
       await Future.delayed(const Duration(milliseconds: 30));
 
       // ── 2: Teachers ────────────────────────────────────────────────────────
-      final existingTeacherNames = dataVm.teachers
-          .map((t) => t.name.toLowerCase().trim())
-          .toSet();
-
+      // Re-checks against the live list on every name (not a fixed
+      // snapshot) so an abbreviated variant seen later in the same sheet
+      // ("M Nawaz" after "Muhammad Nawaz") still resolves to the teacher
+      // just created, instead of spawning a second record for the same
+      // person — which would hide real clashes between their sections.
       for (final name in result.teacherNames) {
-        if (!existingTeacherNames.contains(name.toLowerCase().trim())) {
+        if (_findTeacher(dataVm.teachers, name) == null) {
           dataVm.addTeacher(name);
         }
       }
@@ -105,20 +145,30 @@ class _TimetableGridImportScreenState extends State<TimetableGridImportScreen> {
       await Future.delayed(const Duration(milliseconds: 30));
 
       // ── 3: Courses ────────────────────────────────────────────────────────
-      final level = result.isIntermediate
+      final level = _effectiveIsIntermediate
           ? EducationLevel.intermediate
           : EducationLevel.bachelors;
 
-      final existingCodes = dataVm.courses
-          .where((c) => c.level == level)
-          .map((c) => c.code.toLowerCase())
-          .toSet();
+      // A subject parsed from a day-range annotated (combined-slot) cell
+      // only meets on those specific days — everything else defaults to
+      // the full working week.
+      final subjectCreditHours = <String, int>{};
+      for (final draft in result.assignments) {
+        final d = draft.days;
+        if (d == null) continue;
+        final code = _makeCode(draft.subjectName).toLowerCase();
+        final existing = subjectCreditHours[code];
+        if (existing == null || d.length < existing) subjectCreditHours[code] = d.length;
+      }
 
+      // Same live-list re-check as teachers above — "Math" resolving to an
+      // existing "Mathematics" instead of a second, code-mismatched course.
       for (final subject in result.subjectNames) {
-        final code = _makeCode(subject);
-        if (!existingCodes.contains(code.toLowerCase())) {
-          dataVm.addCourse(subject, code, creditHours: 1, level: level);
-          existingCodes.add(code.toLowerCase());
+        if (_findCourse(dataVm.courses, subject, level) == null) {
+          final code = _makeCode(subject);
+          dataVm.addCourse(subject, code,
+              creditHours: subjectCreditHours[code.toLowerCase()] ?? workingDays,
+              level: level);
         }
       }
 
@@ -126,22 +176,26 @@ class _TimetableGridImportScreenState extends State<TimetableGridImportScreen> {
       await Future.delayed(const Duration(milliseconds: 30));
 
       // ── 4: Programs + Classes ─────────────────────────────────────────────
+      // Keyed by name+level, not name alone — a same-named program at a
+      // DIFFERENT level (e.g. an unrelated existing "Chemistry" program)
+      // must not be silently reused, or every class/assignment built from
+      // it inherits the wrong level.
       final existingPrograms = Map<String, String>.fromEntries(
-        dataVm.programs.map((p) => MapEntry(p.name.toLowerCase(), p.id)),
+        dataVm.programs.map((p) => MapEntry('${p.name.toLowerCase()}|${p.level.index}', p.id)),
       );
       final existingClasses = dataVm.classes
           .map((c) => '${c.programId}__${c.name.toLowerCase()}')
           .toSet();
 
       for (final cls in result.classes) {
-        final progKey = cls.program.toLowerCase();
+        final progKey = '${cls.program.toLowerCase()}|${level.index}';
 
         // Create program if needed
         if (!existingPrograms.containsKey(progKey)) {
           dataVm.addProgram(cls.program, level);
           // Re-fetch after add
           final newProg = dataVm.programs
-              .where((p) => p.name.toLowerCase() == progKey)
+              .where((p) => p.name.toLowerCase() == cls.program.toLowerCase() && p.level == level)
               .firstOrNull;
           if (newProg != null) existingPrograms[progKey] = newProg.id;
         }
@@ -179,64 +233,181 @@ class _TimetableGridImportScreenState extends State<TimetableGridImportScreen> {
       final teachers   = dataVm.teachers;
       final courses    = dataVm.courses;
       final classes    = dataVm.classes;
+      final programs   = dataVm.programs;
       final rooms      = dataVm.rooms;
       final timeSlots  = dataVm.timeSlots
           .where((ts) => ts.level == level)
           .toList()
         ..sort((a, b) => a.period.compareTo(b.period));
+      // periodIndex must resolve by actual clock time, not list position:
+      // Step 1 above skips creating a slot whenever one already exists at
+      // that start time (e.g. an unused 11:00-12:00 default slot), so the
+      // level's slot list can freely interleave old unrelated slots with
+      // the newly-created ones in .period-number order. Indexing straight
+      // into that list silently paired periodIndex 0/1/2/3 with whichever
+      // slots happened to sort first — usually the wrong ones entirely.
+      final slotsByStart = { for (final ts in timeSlots) ts.startTime: ts };
+      TimeSlot? slotForPeriod(int periodIndex) => periodIndex < result.periods.length
+          ? slotsByStart[result.periods[periodIndex].startTime]
+          : null;
 
       for (int i = 0; i < result.assignments.length; i++) {
         final draft = result.assignments[i];
 
-        // Resolve teacher
-        final teacher = teachers
-            .where((t) => t.name.toLowerCase().trim() == draft.teacherName.toLowerCase().trim())
-            .firstOrNull;
+        // Resolve teacher / course (name-fuzzy — see _findTeacher/_findCourse)
+        final teacher = _findTeacher(teachers, draft.teacherName);
         if (teacher == null) continue;
 
-        // Resolve course
-        final code = _makeCode(draft.subjectName);
-        final course = courses
-            .where((c) => c.code.toLowerCase() == code.toLowerCase() && c.level == level)
-            .firstOrNull;
+        final course = _findCourse(courses, draft.subjectName, level);
         if (course == null) continue;
 
-        // Resolve class
+        // Resolve class — scoped to the draft's own program (and level),
+        // not section text alone: two different programs/departments can
+        // share a section name (e.g. "Chemistry" and "Mathematics" both
+        // have a "V" semester class in the BS-file layout), and matching
+        // on section alone let every one of them collide onto whichever
+        // class happened to come first in the list.
+        final progIds = programs
+            .where((p) => p.name.toLowerCase() == draft.programName.toLowerCase() && p.level == level)
+            .map((p) => p.id)
+            .toSet();
+        // draft.section can be empty (a file with no per-row Semester
+        // column, e.g. the "BS I"/"BS III" days-column layout before a
+        // Semester column exists) — c.shortCode.contains('') is vacuously
+        // true for EVERY class in the program, so an empty section must
+        // skip that check entirely and rely only on the exact-name match
+        // (itself only true for another class that is ALSO section-less),
+        // or every classless file's assignments silently attach to
+        // whichever OTHER same-program class happens to be first in the
+        // list — found via two real files sharing a "Chemistry" program.
         final classModel = classes
-            .where((c) => c.shortCode.toLowerCase().contains(draft.section.toLowerCase()) ||
-                          c.name.toLowerCase() == draft.section.toLowerCase())
+            .where((c) => progIds.contains(c.programId) &&
+                          ((draft.section.isNotEmpty &&
+                            c.shortCode.toLowerCase().contains(draft.section.toLowerCase())) ||
+                           c.name.toLowerCase() == draft.section.toLowerCase()))
             .firstOrNull;
         if (classModel == null) continue;
 
-        // Resolve time slot
-        if (draft.periodIndex >= timeSlots.length) continue;
-        final slot = timeSlots[draft.periodIndex];
+        // Resolve time slot (by clock time — see slotForPeriod above)
+        final slot = slotForPeriod(draft.periodIndex);
+        if (slot == null) continue;
 
         // Resolve room (optional)
         final room = draft.roomNo.isNotEmpty
             ? rooms.where((r) => r.name == draft.roomNo).firstOrNull
             : null;
 
-        // Check for duplicate (same teacher + course + class already assigned)
+        // draft.days (e.g. [4, 5, 6] for a combined/split-slot entry that
+        // meets on the SECOND half of the week) has to reach the actual
+        // Assignment as customDays — startSlot/duration alone always
+        // render as a contiguous run starting at day 1, so without this
+        // every non-day-1-starting entry silently occupied the wrong days.
+        final explicitDays = draft.days;
+
+        // Check for duplicate (re-running the same import twice shouldn't
+        // pile up repeats) — but teacher+course+class alone isn't enough:
+        // the SAME teacher can legitimately teach the SAME course to the
+        // SAME class again at a different period/days split (e.g. Munazza
+        // Qari's "Islamic Studies" meeting once on day 3 in one period and
+        // again on day 4 in another) — that's two real sessions, not a
+        // duplicate, so timeSlot and days must match too before skipping.
+        bool sameDays(List<int> a, List<int>? b) {
+          final bl = b ?? const <int>[];
+          return a.length == bl.length && a.toSet().containsAll(bl);
+        }
         final alreadyExists = dataVm.assignments.any((a) =>
             a.teacher.id == teacher.id &&
             a.course.id  == course.id  &&
-            a.classModel.id == classModel.id);
+            a.classModel.id == classModel.id &&
+            a.timeSlotId == slot.id &&
+            sameDays(a.customDays, explicitDays));
         if (alreadyExists) continue;
 
         dataVm.addAssignment(
           teacher:    teacher,
           course:     course,
           classModel: classModel,
-          startSlot:  1,
-          duration:   1,
+          startSlot:  explicitDays != null && explicitDays.isNotEmpty ? explicitDays.first : 1,
+          duration:   explicitDays != null && explicitDays.isNotEmpty
+              ? explicitDays.length
+              : course.creditHours.clamp(1, workingDays),
           timeSlotId: slot.id,
+          customDays: explicitDays ?? const [],
           roomId:     room?.id,
           autoAssigned: true,
         );
 
         if (i % 20 == 0) {
-          _updateProgress(0.70 + (0.28 * i / result.assignments.length), 'Building assignments…');
+          _updateProgress(0.70 + (0.15 * i / result.assignments.length), 'Building assignments…');
+          await Future.delayed(Duration.zero);
+        }
+      }
+
+      _updateProgress(0.85, 'Building elective groups…');
+      await Future.delayed(const Duration(milliseconds: 30));
+
+      // ── 7: Elective groups ────────────────────────────────────────────────
+      // Each ParsedElectiveDraft is one merged cell — its classNames cover
+      // every class row the merge spanned, its entries are the alternate
+      // subject/teacher/room options students choose between in that period.
+      for (int i = 0; i < result.electives.length; i++) {
+        final draft = result.electives[i];
+
+        final slot = slotForPeriod(draft.periodIndex);
+        if (slot == null) continue;
+
+        final classIds = <String>{};
+        for (final className in draft.classNames) {
+          final section = className.contains(' - ') ? className.split(' - ').last : className;
+          final cls = classes
+              .where((c) => c.shortCode.toLowerCase().contains(section.toLowerCase()) ||
+                            c.name.toLowerCase() == section.toLowerCase())
+              .firstOrNull;
+          if (cls != null) classIds.add(cls.id);
+        }
+        if (classIds.isEmpty) continue;
+
+        final entries = <ElectiveEntry>[];
+        for (final opt in draft.entries) {
+          final teacher = _findTeacher(teachers, opt.teacherName);
+          if (teacher == null) continue;
+
+          final course = _findCourse(courses, opt.subjectName, level);
+          if (course == null) continue;
+
+          final room = opt.roomNo.isNotEmpty
+              ? rooms.where((r) => r.name == opt.roomNo).firstOrNull
+              : null;
+
+          entries.add(ElectiveEntry(
+            id: _uid(),
+            courseId:  course.id,  courseName:  course.name,
+            teacherId: teacher.id, teacherName: teacher.name,
+            roomId:    room?.id,   roomLabel:   room?.name,
+          ));
+        }
+        if (entries.isEmpty) continue;
+
+        // Skip an exact duplicate of an already-imported/existing group so
+        // re-running the import doesn't pile up repeats.
+        final alreadyExists = dataVm.electiveGroups.any((g) =>
+            g.timeSlotId == slot.id &&
+            g.classIds.toSet().containsAll(classIds) &&
+            classIds.containsAll(g.classIds.toSet()) &&
+            g.entries.length == entries.length &&
+            g.entries.every((e) => entries.any((ne) =>
+                ne.courseId == e.courseId && ne.teacherId == e.teacherId)));
+        if (alreadyExists) continue;
+
+        dataVm.addElectiveGroup(ElectiveGroup(
+          id: _uid(),
+          timeSlotId: slot.id,
+          classIds: classIds.toList(),
+          entries: entries,
+        ));
+
+        if (i % 5 == 0) {
+          _updateProgress(0.85 + (0.13 * i / result.electives.length), 'Building elective groups…');
           await Future.delayed(Duration.zero);
         }
       }
@@ -266,6 +437,42 @@ class _TimetableGridImportScreenState extends State<TimetableGridImportScreen> {
     final words = subject.trim().split(RegExp(r'\s+'));
     if (words.length == 1) return words[0].substring(0, words[0].length.clamp(0, 6)).toUpperCase();
     return words.map((w) => w.isNotEmpty ? w[0].toUpperCase() : '').join().substring(0, words.length.clamp(0, 5));
+  }
+
+  String _uid() => DateTime.now().microsecondsSinceEpoch.toString();
+
+  // ── Fuzzy identity matching ──────────────────────────────────────────────
+  // Source sheets routinely abbreviate names ("Muhammad Nawaz" → "M Nawaz")
+  // and subjects ("Mathematics" → "Math") relative to however they're
+  // already spelled out in the app's data. Matching on exact string
+  // equality alone spawns a duplicate teacher/course per variant instead of
+  // resolving to the one that already exists — and a duplicate teacher is
+  // worse than cosmetic: the clash checker treats "M Nawaz" and "Muhammad
+  // Nawaz" as two different people, so a real double-booking between their
+  // sections goes undetected. The actual comparisons live in the service
+  // (TimetableGridImportService.teacherNamesMatch/courseNamesMatch) — pure
+  // string logic, tested there; these two just apply it against the app's
+  // live teacher/course lists.
+
+  Teacher? _findTeacher(List<Teacher> teachers, String name) {
+    final target = name.toLowerCase().trim();
+    final exact = teachers.where((t) => t.name.toLowerCase().trim() == target).firstOrNull;
+    if (exact != null) return exact;
+    return teachers
+        .where((t) => TimetableGridImportService.teacherNamesMatch(t.name, name))
+        .firstOrNull;
+  }
+
+  Course? _findCourse(List<Course> courses, String subjectName, EducationLevel level) {
+    final code = _makeCode(subjectName).toLowerCase();
+    final byCode = courses
+        .where((c) => c.level == level && c.code.toLowerCase() == code)
+        .firstOrNull;
+    if (byCode != null) return byCode;
+    return courses
+        .where((c) => c.level == level &&
+            TimetableGridImportService.courseNamesMatch(c.name, subjectName))
+        .firstOrNull;
   }
 
   // ── Build ─────────────────────────────────────────────────────────────────
@@ -303,6 +510,19 @@ class _TimetableGridImportScreenState extends State<TimetableGridImportScreen> {
                         style: GoogleFonts.plusJakartaSans(fontSize: 12,
                             color: isDark ? AppTheme.textSecondary : AppTheme.lightTextSec)),
                   ]),
+                  const Spacer(),
+                  GestureDetector(
+                    onTap: () => Navigator.of(context).pop(),
+                    child: Container(
+                      width: 32, height: 32,
+                      decoration: BoxDecoration(
+                        color: isDark ? Colors.white.withValues(alpha: .06) : const Color(0xFFF1F5F9),
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                      child: Icon(Icons.close_rounded, size: 18,
+                          color: isDark ? AppTheme.textSecondary : AppTheme.lightTextSec),
+                    ),
+                  ),
                 ]),
                 const SizedBox(height: 28),
 
@@ -417,22 +637,31 @@ class _TimetableGridImportScreenState extends State<TimetableGridImportScreen> {
 
       const SizedBox(height: 20),
 
-      // Level badge
-      Container(
-        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-        decoration: BoxDecoration(
-          color: (r.isIntermediate ? AppTheme.accentTeal : const Color(0xFF8B5CF6)).withValues(alpha: .12),
-          borderRadius: BorderRadius.circular(20),
-          border: Border.all(color: (r.isIntermediate ? AppTheme.accentTeal : const Color(0xFF8B5CF6)).withValues(alpha: .4)),
+      // Level badge — tap to override if auto-detection got it wrong (bare
+      // department names like "Chemistry" carry no BS/FA-style signal).
+      GestureDetector(
+        onTap: () => setState(() => _levelOverride = !_effectiveIsIntermediate),
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+          decoration: BoxDecoration(
+            color: (_effectiveIsIntermediate ? AppTheme.accentTeal : const Color(0xFF8B5CF6)).withValues(alpha: .12),
+            borderRadius: BorderRadius.circular(20),
+            border: Border.all(color: (_effectiveIsIntermediate ? AppTheme.accentTeal : const Color(0xFF8B5CF6)).withValues(alpha: .4)),
+          ),
+          child: Row(mainAxisSize: MainAxisSize.min, children: [
+            Icon(Icons.label_rounded,
+                size: 16, color: _effectiveIsIntermediate ? AppTheme.accentTeal : const Color(0xFF8B5CF6)),
+            const SizedBox(width: 8),
+            Text(
+                '${_levelOverride != null ? "Level" : "Level detected"}: '
+                '${_effectiveIsIntermediate ? "Intermediate" : "Bachelors"}',
+                style: GoogleFonts.plusJakartaSans(fontSize: 13, fontWeight: FontWeight.w700,
+                    color: _effectiveIsIntermediate ? AppTheme.accentTeal : const Color(0xFF8B5CF6))),
+            const SizedBox(width: 6),
+            Icon(Icons.edit_rounded, size: 13,
+                color: (_effectiveIsIntermediate ? AppTheme.accentTeal : const Color(0xFF8B5CF6)).withValues(alpha: .7)),
+          ]),
         ),
-        child: Row(mainAxisSize: MainAxisSize.min, children: [
-          Icon(Icons.label_rounded,
-              size: 16, color: r.isIntermediate ? AppTheme.accentTeal : const Color(0xFF8B5CF6)),
-          const SizedBox(width: 8),
-          Text('Level detected: ${r.isIntermediate ? "Intermediate" : "Bachelors"}',
-              style: GoogleFonts.plusJakartaSans(fontSize: 13, fontWeight: FontWeight.w700,
-                  color: r.isIntermediate ? AppTheme.accentTeal : const Color(0xFF8B5CF6))),
-        ]),
       ),
 
       const SizedBox(height: 20),

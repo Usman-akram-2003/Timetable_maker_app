@@ -1,0 +1,8 @@
+{
+  "name": "batch_import_node",
+  "private": true,
+  "type": "commonjs",
+  "dependencies": {
+    "firebase-admin": "^12.0.0"
+  }
+}

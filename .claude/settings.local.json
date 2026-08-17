@@ -26,7 +26,8 @@
       "Read(//c/Users/Admin/AppData/Local/Temp/claude/C--Projects-timetable-maker-app/b58a8dd8-1539-46cc-b97d-b0cf4d67cf53/tasks/**)",
       "Read(//c/Users/Admin/AppData/Local/Temp/claude/C--Projects-timetable-maker-app/b58a8dd8-1539-46cc-b97d-b0cf4d67cf53/scratchpad/**)",
       "Bash(timeout 45 bash -c 'until tasklist //FI \"IMAGENAME eq timetable_maker_app.exe\" 2>/dev/null | grep -q timetable_maker_app; do sleep 2; done; echo RUNNING')",
-      "Bash(\"/c/Projects/timetable_maker_app/build/windows/x64/runner/Debug/timetable_maker_app.exe\")"
+      "Bash(\"/c/Projects/timetable_maker_app/build/windows/x64/runner/Debug/timetable_maker_app.exe\")",
+      "Bash(flutter test *)"
     ]
   }
 }

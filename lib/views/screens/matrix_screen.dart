@@ -1002,7 +1002,14 @@ class _MatrixScreenState extends State<MatrixScreen>
   Widget _classPeriodMatrix(BuildContext ctx, DataEntryViewModel dataVm, AllocatorViewModel allocVm, SettingsViewModel settingsVm, Set<String> clashingElectiveEntryIds, Set<String> clashingAssignmentIds) {
     final allSlots = dataVm.timeSlots.toList()..sort((a, b) {
       final lc = a.level.index.compareTo(b.level.index);
-      return lc != 0 ? lc : a.period.compareTo(b.period);
+      // Chronological, not insertion order: .period is just an arbitrary
+      // auto-incrementing id assigned at creation time (see addTimeSlot),
+      // with no guaranteed relationship to actual clock time once slots
+      // get added across separate sessions/imports. The timeline below
+      // renders columns strictly left-to-right and only positions the
+      // FIRST one absolutely — if this list isn't chronological, every
+      // later column silently renders at the wrong clock position.
+      return lc != 0 ? lc : _parseMin(a.startTime).compareTo(_parseMin(b.startTime));
     });
 
     // Show ALL configured slots â€” maxPeriods only limits GA engine, not display
@@ -1591,7 +1598,14 @@ class _MatrixScreenState extends State<MatrixScreen>
     // Same slot setup as classPeriodMatrix
     final allSlots = dataVm.timeSlots.toList()..sort((a, b) {
       final lc = a.level.index.compareTo(b.level.index);
-      return lc != 0 ? lc : a.period.compareTo(b.period);
+      // Chronological, not insertion order: .period is just an arbitrary
+      // auto-incrementing id assigned at creation time (see addTimeSlot),
+      // with no guaranteed relationship to actual clock time once slots
+      // get added across separate sessions/imports. The timeline below
+      // renders columns strictly left-to-right and only positions the
+      // FIRST one absolutely — if this list isn't chronological, every
+      // later column silently renders at the wrong clock position.
+      return lc != 0 ? lc : _parseMin(a.startTime).compareTo(_parseMin(b.startTime));
     });
     // Show ALL configured slots
     final bachSlots  = allSlots.where((t) => t.level == EducationLevel.bachelors).toList();
@@ -2003,7 +2017,14 @@ class _MatrixScreenState extends State<MatrixScreen>
     // Same slot setup as classPeriodMatrix
     final allSlots = dataVm.timeSlots.toList()..sort((a, b) {
       final lc = a.level.index.compareTo(b.level.index);
-      return lc != 0 ? lc : a.period.compareTo(b.period);
+      // Chronological, not insertion order: .period is just an arbitrary
+      // auto-incrementing id assigned at creation time (see addTimeSlot),
+      // with no guaranteed relationship to actual clock time once slots
+      // get added across separate sessions/imports. The timeline below
+      // renders columns strictly left-to-right and only positions the
+      // FIRST one absolutely — if this list isn't chronological, every
+      // later column silently renders at the wrong clock position.
+      return lc != 0 ? lc : _parseMin(a.startTime).compareTo(_parseMin(b.startTime));
     });
     // Show ALL configured slots
     final bachSlots  = allSlots.where((t) => t.level == EducationLevel.bachelors).toList();
