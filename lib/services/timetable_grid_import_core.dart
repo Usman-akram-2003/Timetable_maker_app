@@ -337,18 +337,54 @@ class TimetableGridImportService {
         if (rawSection.isNotEmpty) carrySection = rawSection;
         if (rawRoom.isNotEmpty)    carryRoom    = rawRoom;
 
+        // Some sheets (GGC's Arts rows again) leave the Sec column blank
+        // for a whole block but still embed a per-row section marker
+        // directly in each period cell's subject text — e.g. "Eng A0 51",
+        // "Urdu  A0 51" repeat the SAME "A0" + room "51" across every
+        // period column of one row, then "A1"/52, "A2"/53 for the next
+        // rows. Without recovering it, every row in the block collapses
+        // onto one class: three unrelated sections' teachers all land on
+        // the SAME period of the SAME class, registering as false clashes,
+        // and the token is left glued onto the subject ("Eng A0" instead
+        // of "Eng"). Only attempted when the real Sec column has nothing
+        // to say — a file that already has a real per-row section never
+        // reaches this.
+        var rowSection = carrySection;
+        if (rowSection.isEmpty) {
+          for (final p in periodCols) {
+            final cellText = ((p < row.length ? row[p]?.toString() : null) ?? '')
+                .split('\n').map((l) => l.trim()).where((l) => l.isNotEmpty).lastOrNull ?? '';
+            final m = RegExp(r'\b([A-Za-z]\d{1,2})\s+\d{2,3}\s*$').firstMatch(cellText);
+            if (m != null) { rowSection = m.group(1)!; break; }
+          }
+        }
+
         // Skip meta rows (total/summary)
-        final secLower = carrySection.toLowerCase();
+        final secLower = rowSection.toLowerCase();
         if (secLower == 'g.s' || secLower == 'gs') continue;
 
+        // Some real sheets (GGC's combined-shift Intermediate files, e.g.
+        // "Arts-I + ICS Part-I") leave the merged Class column blank for
+        // whole leading blocks of rows — the very first data row in
+        // particular is routinely blank, since the Class cell is only
+        // filled in wherever the *second* program named in the title
+        // starts. With carryClass still '' at that point, _buildClassName
+        // used to return '' and the row was dropped outright — real
+        // teacher/subject data silently lost, not just mislabeled. Falling
+        // back to the sheet's own title cell keeps the row (and gives it a
+        // distinct, if generic, class) instead of discarding it; once a
+        // real Class cell is seen later in the sheet, carryClass takes
+        // over exactly as before.
+        final effectiveClass = carryClass.isNotEmpty ? carryClass : _titleAsClassFallback(titleCell);
+
         // Build class label
-        final classLabel = _buildClassName(carryClass, carrySection);
+        final classLabel = _buildClassName(effectiveClass, rowSection);
         if (classLabel.isEmpty) continue;
 
-        final programLabel = _cleanProgram(carryClass);
+        final programLabel = _cleanProgram(effectiveClass);
         if (carryRoom.isNotEmpty) roomNumbers.add(carryRoom);
 
-        classSet.add((program: programLabel, section: carrySection));
+        classSet.add((program: programLabel, section: rowSection));
 
         // Parse each period cell
         for (int p = 0; p < periodCols.length; p++) {
@@ -580,9 +616,22 @@ class TimetableGridImportService {
     final d2 = int.tryParse(dayMatch.group(2) ?? '');
     if (d1 == null || d2 == null || d1 < 1 || d2 < d1) return null;
 
-    final rest = ('${line.substring(0, dayMatch.start)} ${line.substring(dayMatch.end)}')
+    var rest = ('${line.substring(0, dayMatch.start)} ${line.substring(dayMatch.end)}')
         .replaceAll(RegExp(r'\([^)]*\)'), ' ') // strip other notes e.g. "(For non-Muslim)"
         .trim();
+
+    // A trailing room number (e.g. "PS Ahsan Jamal (1-2) 47") sits right
+    // after the day annotation once it's stripped — pull it out before
+    // subject/teacher splitting using the same convention as every other
+    // room extraction in this file, or it's left glued onto the teacher
+    // name ("Ahsan Jamal 47") instead of a real room: the room is lost,
+    // and the corrupted name no longer fuzzy-matches the real teacher.
+    var roomNo = '';
+    final roomMatch = RegExp(r'\b(\d{2,3})\s*$').firstMatch(rest);
+    if (roomMatch != null) {
+      roomNo = roomMatch.group(1)!;
+      rest = rest.substring(0, roomMatch.start).trim();
+    }
     final lower = rest.toLowerCase();
 
     // Match the FULL word the keyword starts (\w* extension), not just the
@@ -605,7 +654,7 @@ class TimetableGridImportService {
     return ParsedCell(
       teacherName: teacher,
       subjectName: subject,
-      roomNo: '',
+      roomNo: roomNo,
       days: List<int>.generate(d2 - d1 + 1, (i) => d1 + i),
     );
   }
@@ -881,6 +930,13 @@ class TimetableGridImportService {
       teacherRaw  = teacherRaw.substring(0, roomMatchT.start).trim();
     }
 
+    // A row-level section marker some sheets embed inline (e.g. "Eng A0",
+    // after the room above has already been stripped off "Eng A0 51") —
+    // see the row loop's rowSection recovery. Strip it here too, or it's
+    // left glued onto the course name instead of the section it actually
+    // is.
+    subjectRaw = subjectRaw.replaceAll(RegExp(r'\s+[A-Za-z]\d{1,2}$'), '').trim();
+
     // Clean up shorthand subject codes like "EngV1 " → keep just subject name
     subjectRaw = _expandSubject(subjectRaw);
 
@@ -936,6 +992,20 @@ class TimetableGridImportService {
 
   static String _cleanProgram(String raw) =>
       raw.replaceAll('\n', ' ').trim();
+
+  // Strips the boilerplate every GGC sheet title shares ("Time Table
+  // G.G.C. Sahiwal … w.e.f <date>") down to just the program descriptor in
+  // the middle, e.g. "Time Table G.G.C. Sahiwal Arts-I + ICS Part-I (2026)
+  // w.e.f 25 August 2026" → "Arts-I + ICS Part-I (2026)". Used only as a
+  // last-resort class label when a row's own Class column was never filled.
+  static String _titleAsClassFallback(String titleCell) {
+    var t = titleCell;
+    final wefIdx = t.toLowerCase().indexOf('w.e.f');
+    if (wefIdx != -1) t = t.substring(0, wefIdx);
+    t = t.replaceAll(RegExp(r'time\s*table', caseSensitive: false), '');
+    t = t.replaceAll(RegExp(r'g\.?\s*g\.?\s*c\.?\s*sahiwal', caseSensitive: false), '');
+    return t.replaceAll(RegExp(r'\s+'), ' ').trim();
+  }
 
   // ── 12-hour → 24-hour resolution ────────────────────────────────────────────
   // Timetable headers write bare 12-hour clock with no AM/PM marker —

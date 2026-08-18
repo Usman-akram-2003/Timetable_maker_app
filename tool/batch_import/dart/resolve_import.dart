@@ -441,10 +441,12 @@ void resolveOneFile(ImportState st, TimetableGridImportResult result, FileReport
     rpt.assignmentsBuilt++;
   }
 
-  // ── 7: Elective groups (screen lines ~267-331) — NOTE: class resolution
-  // here is intentionally UNSCOPED by program/level, replicating the
-  // existing (imperfect) UI behaviour exactly rather than silently
-  // tightening it — see README's flagged risk.
+  // ── 7: Elective groups (screen lines ~349-380) — scoped by program+level,
+  // matching the assignment loop above: two different Intermediate files
+  // can produce the same section labels (e.g. both "Arts-I…" and
+  // "Arts-II…" recovering "A0"/"A1"/"A2" from embedded row markers), and
+  // matching on section text alone let an elective from one file attach to
+  // the OTHER file's same-named class.
   for (final draft in result.electives) {
     final slot = slotForPeriod(draft.periodIndex);
     if (slot == null) continue;
@@ -452,10 +454,18 @@ void resolveOneFile(ImportState st, TimetableGridImportResult result, FileReport
     final classIds = <String>{};
     final resolvedNames = <String>[];
     for (final className in draft.classNames) {
-      final section = className.contains(' - ') ? className.split(' - ').last : className;
+      final hasSection = className.contains(' - ');
+      final progName = hasSection ? className.substring(0, className.lastIndexOf(' - ')) : className;
+      final section = hasSection ? className.split(' - ').last : '';
+
+      final egProgIds = st.programs
+          .where((p) => p.name.toLowerCase() == progName.toLowerCase() && p.level == level)
+          .map((p) => p.id).toSet();
+
       final cls = st.classes.where((c) =>
-          c.shortCode.toLowerCase().contains(section.toLowerCase()) ||
-          c.name.toLowerCase() == section.toLowerCase()).firstOrNull;
+          egProgIds.contains(c.programId) &&
+          ((section.isNotEmpty && c.shortCode.toLowerCase().contains(section.toLowerCase())) ||
+           c.name.toLowerCase() == section.toLowerCase())).firstOrNull;
       if (cls != null) { classIds.add(cls.id); resolvedNames.add('${cls.shortCode} (wanted "$className")'); }
     }
     if (classIds.isEmpty) continue;

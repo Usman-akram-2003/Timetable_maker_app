@@ -356,12 +356,31 @@ class _TimetableGridImportScreenState extends State<TimetableGridImportScreen> {
         final slot = slotForPeriod(draft.periodIndex);
         if (slot == null) continue;
 
+        // Scoped by program (+ level, like the assignment loop above) —
+        // not section text alone: two different Intermediate files can
+        // legitimately produce the same section labels (e.g. both
+        // "Arts-I…" and "Arts-II…" recover "A0"/"A1"/"A2" sections from
+        // embedded row markers), and matching on section alone let an
+        // elective built from one file's rows attach to the OTHER file's
+        // same-named class.
         final classIds = <String>{};
         for (final className in draft.classNames) {
-          final section = className.contains(' - ') ? className.split(' - ').last : className;
+          final hasSection = className.contains(' - ');
+          final progName = hasSection
+              ? className.substring(0, className.lastIndexOf(' - '))
+              : className;
+          final section = hasSection ? className.split(' - ').last : '';
+
+          final egProgIds = programs
+              .where((p) => p.name.toLowerCase() == progName.toLowerCase() && p.level == level)
+              .map((p) => p.id)
+              .toSet();
+
           final cls = classes
-              .where((c) => c.shortCode.toLowerCase().contains(section.toLowerCase()) ||
-                            c.name.toLowerCase() == section.toLowerCase())
+              .where((c) => egProgIds.contains(c.programId) &&
+                            ((section.isNotEmpty &&
+                              c.shortCode.toLowerCase().contains(section.toLowerCase())) ||
+                             c.name.toLowerCase() == section.toLowerCase()))
               .firstOrNull;
           if (cls != null) classIds.add(cls.id);
         }
