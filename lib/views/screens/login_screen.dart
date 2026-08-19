@@ -2,6 +2,7 @@ import 'dart:ui';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:provider/provider.dart';
+import 'package:lucide_icons_flutter/lucide_icons.dart';
 import '../../viewmodels/auth_viewmodel.dart';
 import '../../app_theme.dart';
 
@@ -150,7 +151,7 @@ class _LoginScreenState extends State<LoginScreen> with SingleTickerProviderStat
                   mainAxisSize: MainAxisSize.min,
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
-                    Icon(Icons.calendar_month_rounded, size: 56, color: isDark ? Colors.white : AppTheme.accentCyan),
+                    Icon(LucideIcons.table, size: 52, color: isDark ? Colors.white : AppTheme.accentCyan),
                     const SizedBox(height: 24),
                     Text('Welcome Back', textAlign: TextAlign.center, style: GoogleFonts.plusJakartaSans(
                       fontSize: 28, fontWeight: FontWeight.w800, color: textCol,

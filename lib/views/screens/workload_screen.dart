@@ -395,7 +395,7 @@ class _SummaryRow extends StatelessWidget {
         children: [
           _SumCell('$totalTeachers', 'Total Teachers', AppTheme.accentCyan, tp, ts),
           _div(bd),
-          _SumCell(_fmtHours(totalHours), 'Total Hours', AppTheme.accentViolet, tp, ts),
+          _SumCell(_fmtHours(totalHours), 'Total Hours', AppTheme.accentBlue, tp, ts),
           _div(bd),
           _SumCell('$balanced', 'Balanced', AppTheme.success, tp, ts),
           _div(bd),

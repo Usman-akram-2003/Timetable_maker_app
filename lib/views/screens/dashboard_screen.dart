@@ -2,6 +2,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:lucide_icons_flutter/lucide_icons.dart';
 import '../../viewmodels/data_entry_viewmodel.dart';
 import '../../viewmodels/allocator_viewmodel.dart';
 import '../../viewmodels/settings_viewmodel.dart';
@@ -176,7 +177,7 @@ class _DesktopRail extends StatelessWidget {
                   borderRadius: BorderRadius.circular(12),
                   boxShadow: [BoxShadow(color: AppTheme.accentCyan.withValues(alpha: .35),
                       blurRadius: 12, offset: const Offset(0,4))]),
-              child: const Icon(Icons.calendar_month_rounded, color: Colors.white, size: 20)),
+              child: const Icon(LucideIcons.table, color: Colors.white, size: 19)),
             const SizedBox(width: 12),
             Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
               Text('Timetable', style: GoogleFonts.plusJakartaSans(
@@ -196,11 +197,13 @@ class _DesktopRail extends StatelessWidget {
         ...List.generate(_dests.length, (i) {
           final d   = _dests[i];
           final sel = selectedIndex == i;
-          final col = AppTheme.accentCyan;
-          final bg  = sel ? col.withValues(alpha: .12) : Colors.transparent;
-          final txtCol = sel ? col
+          // Selected item is a solid filled pill (not a tint) — one
+          // confident state instead of tint+border+dot competing for the
+          // same signal.
+          final fillCol = isDark ? AppTheme.accentBlue : const Color(0xFF151823);
+          final txtCol = sel ? Colors.white
               : (isDark ? AppTheme.textSecondary : AppTheme.lightTextSec);
-          final icnCol = sel ? col
+          final icnCol = sel ? Colors.white
               : (isDark ? AppTheme.textMuted : AppTheme.lightTextMut);
 
           return Padding(
@@ -211,9 +214,10 @@ class _DesktopRail extends StatelessWidget {
                 duration: const Duration(milliseconds: 180),
                 padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
                 decoration: BoxDecoration(
-                  color: bg,
+                  color: sel ? fillCol : Colors.transparent,
                   borderRadius: BorderRadius.circular(12),
-                  border: sel ? Border.all(color: col.withValues(alpha: .25)) : null,
+                  boxShadow: sel ? [BoxShadow(color: fillCol.withValues(alpha: .35),
+                      blurRadius: 10, offset: const Offset(0, 4))] : null,
                 ),
                 child: Row(children: [
                   AnimatedSwitcher(
@@ -242,11 +246,6 @@ class _DesktopRail extends StatelessWidget {
                   Text(d.label, style: GoogleFonts.plusJakartaSans(
                       fontSize: 13, fontWeight: sel ? FontWeight.w700 : FontWeight.w500,
                       color: txtCol)),
-                  if (sel) ...[
-                    const Spacer(),
-                    Container(width: 4, height: 4,
-                        decoration: BoxDecoration(shape: BoxShape.circle, color: col)),
-                  ],
                 ]),
               ),
             ),
@@ -371,8 +370,6 @@ extension _DashTh on BuildContext {
 
   BoxDecoration _solidC({double r = 18}) =>
       _dk ? AppTheme.solidCard(radius: r) : AppTheme.solidCardLight(radius: r);
-  BoxDecoration _glassC({double r = 20}) =>
-      _dk ? AppTheme.glassCard(radius: r) : AppTheme.glassCardLight(radius: r);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -408,11 +405,17 @@ class _CommandCenter extends StatelessWidget {
                 _statGrid(ctx, vm),
                 const SizedBox(height: 20),
                 if (clashes != null) ...[_clashBanner(clashes), const SizedBox(height: 16)],
-                _heroBanner(ready, vm, ctx),
-                const SizedBox(height: 20),
-                if (vm.assignments.isNotEmpty) _summaryBar(ctx, vm),
-                if (vm.assignments.isNotEmpty) const SizedBox(height: 20),
-                _howItWorks(ctx),
+                IntrinsicHeight(
+                  child: Row(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+                    Expanded(flex: 16, child: _heroBanner(ready, vm, ctx)),
+                    const SizedBox(width: 16),
+                    Expanded(flex: 10, child: _howItWorks(ctx)),
+                  ]),
+                ),
+                if (vm.assignments.isNotEmpty) ...[
+                  const SizedBox(height: 20),
+                  _summaryBar(ctx, vm),
+                ],
               ],
             ),
           ),
@@ -427,7 +430,7 @@ class _CommandCenter extends StatelessWidget {
             borderRadius: BorderRadius.circular(14),
             boxShadow: [BoxShadow(color: AppTheme.accentCyan.withValues(alpha: .4),
                 blurRadius: 18, offset: const Offset(0,6))]),
-        child: const Icon(Icons.calendar_month_rounded, color: Colors.white, size: 28)),
+        child: const Icon(LucideIcons.table, color: Colors.white, size: 26)),
     const SizedBox(width: 14),
     Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
       Text('Timetable Maker', style: GoogleFonts.plusJakartaSans(
@@ -440,17 +443,19 @@ class _CommandCenter extends StatelessWidget {
 
   Widget _statGrid(BuildContext ctx, DataEntryViewModel vm) {
     final stats = [
-      (Icons.people_alt_rounded,           AppTheme.cyanGradient,   AppTheme.accentCyan,   'Teachers',    vm.teachers.length,    1, 0),
-      (Icons.menu_book_rounded,            AppTheme.tealGradient,   AppTheme.accentTeal,   'Courses',     vm.courses.length,     1, 1),
-      (Icons.folder_rounded,               _amberGrad,              AppTheme.accentAmber,  'Programs',    vm.programs.length,    1, 2),
-      (Icons.school_rounded,               _orangeGrad,             _orange,               'Classes',     vm.classes.length,     1, 2),
-      (Icons.meeting_room_rounded,         _pinkGrad,               _pink,                 'Rooms',       vm.rooms.length,       1, 3),
-      (Icons.assignment_turned_in_rounded, AppTheme.violetGradient, AppTheme.accentViolet, 'Assignments', vm.assignments.length, 2, null),
+      (LucideIcons.presentation, AppTheme.cyanGradient, AppTheme.accentCyan,  'Teachers',    vm.teachers.length,    1, 0),
+      (LucideIcons.bookOpen,     AppTheme.tealGradient,  AppTheme.accentTeal,  'Courses',     vm.courses.length,     1, 1),
+      (LucideIcons.folder,       _amberGrad,             AppTheme.accentAmber, 'Programs',    vm.programs.length,    1, 2),
+      (LucideIcons.graduationCap,_orangeGrad,            _orange,              'Classes',     vm.classes.length,     1, 2),
+      (LucideIcons.doorOpen,     _pinkGrad,              _pink,                'Rooms',       vm.rooms.length,       1, 3),
+      (LucideIcons.checkSquare,  AppTheme.blueGradient,  AppTheme.accentBlue,  'Assignments', vm.assignments.length, 2, null),
     ];
     return AdaptiveGrid(
       cols: 3,
       children: stats.map((s) => _StatCard(
-          icon: s.$1, gradient: s.$2, glow: s.$3, label: s.$4, value: s.$5, onTap: () => onNavigate(s.$6, dataEntryIdx: s.$7),)).toList(),
+          icon: s.$1, glow: s.$3, label: s.$4, value: s.$5,
+          highlight: s.$4 == 'Assignments',
+          onTap: () => onNavigate(s.$6, dataEntryIdx: s.$7),)).toList(),
     );
   }
 
@@ -475,50 +480,67 @@ class _CommandCenter extends StatelessWidget {
     ]),
   );
 
-  Widget _heroBanner(bool ready, DataEntryViewModel vm, BuildContext ctx) =>
-      Container(
-    padding: const EdgeInsets.all(28),
-    decoration: BoxDecoration(
-      borderRadius: BorderRadius.circular(20),
-      gradient: ready
-          ? const LinearGradient(colors: [Color(0xFF059669), Color(0xFF0D9488)],
-          begin: Alignment.topLeft, end: Alignment.bottomRight)
-          : AppTheme.heroGradient,
-      boxShadow: [BoxShadow(
-          color: (ready ? AppTheme.accentTeal : AppTheme.accentCyan).withValues(alpha: .2),
-          blurRadius: 30, offset: const Offset(0, 8))],
-    ),
-    child: Row(children: [
-      Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        Text(ready ? 'Ready to Generate' : 'Engine Standing By',
-            style: GoogleFonts.plusJakartaSans(
-                fontSize: 20, fontWeight: FontWeight.w800,
-                color: Colors.white, letterSpacing: -0.3)),
-        const SizedBox(height: 6),
-        Text(ready
-            ? 'All data loaded. Go to Allocator, run Clash Validator, view in Schedule.'
-            : 'Add data in Manage Data, then assign slots in Allocator.',
-            style: GoogleFonts.plusJakartaSans(fontSize: 13,
-                color: Colors.white.withValues(alpha: .85), height: 1.6)),
-        if (ready) ...[
-          const SizedBox(height: 12),
-          Wrap(spacing: 8, runSpacing: 6, children: [
-            _Pill('${vm.teachers.length} Teachers', AppTheme.accentCyan),
-            _Pill('${vm.courses.length} Courses',   AppTheme.accentTeal),
-            _Pill('${vm.assignments.length} Assigned', Colors.white),
-            _Pill('${vm.rooms.length} Rooms',       AppTheme.accentAmber),
-          ]),
-        ],
-      ])),
-      const SizedBox(width: 16),
-      Container(padding: const EdgeInsets.all(14),
-          decoration: BoxDecoration(color: Colors.white.withValues(alpha: .15),
-              shape: BoxShape.circle,
-              border: Border.all(color: Colors.white.withValues(alpha: .25))),
-          child: Icon(ready ? Icons.rocket_launch_rounded : Icons.auto_awesome_rounded,
-              size: 34, color: Colors.white)),
-    ]),
-  );
+  // Dark card with a single soft radial accent in the corner instead of a
+  // full gradient fill — one deliberate glow reads calmer at this size than
+  // color wall-to-wall, and it's the same "one accent, used once" idea the
+  // stat grid's highlighted Assignments tile uses.
+  Widget _heroBanner(bool ready, DataEntryViewModel vm, BuildContext ctx) {
+    final glow = ready ? AppTheme.accentTeal : AppTheme.accentBlue;
+    return Container(
+      padding: const EdgeInsets.all(28),
+      clipBehavior: Clip.antiAlias,
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(20),
+        color: const Color(0xFF12172A),
+        boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: .25),
+            blurRadius: 24, offset: const Offset(0, 10))],
+      ),
+      child: Stack(children: [
+        Positioned(top: -70, right: -70,
+            child: Container(width: 220, height: 220,
+                decoration: BoxDecoration(shape: BoxShape.circle,
+                    gradient: RadialGradient(colors: [
+                      glow.withValues(alpha: .35), glow.withValues(alpha: 0),
+                    ])))),
+        Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Text(ready ? 'Ready to Generate' : 'Engine Standing By',
+              style: GoogleFonts.plusJakartaSans(
+                  fontSize: 19, fontWeight: FontWeight.w800,
+                  color: Colors.white, letterSpacing: -0.3)),
+          const SizedBox(height: 6),
+          Text(ready
+              ? 'All data loaded. Go to Allocator, run Clash Validator, view in Schedule.'
+              : 'Add data in Manage Data, then assign slots in Allocator.',
+              style: GoogleFonts.plusJakartaSans(fontSize: 12.5,
+                  color: Colors.white.withValues(alpha: .65), height: 1.6)),
+          if (ready) ...[
+            const SizedBox(height: 14),
+            Wrap(spacing: 8, runSpacing: 6, children: [
+              _Pill('${vm.teachers.length} Teachers', AppTheme.accentCyan),
+              _Pill('${vm.courses.length} Courses',   AppTheme.accentTeal),
+              _Pill('${vm.assignments.length} Assigned', Colors.white),
+              _Pill('${vm.rooms.length} Rooms',       AppTheme.accentAmber),
+            ]),
+          ],
+          const SizedBox(height: 18),
+          GestureDetector(
+            onTap: () => onNavigate(2),
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 11),
+              decoration: BoxDecoration(gradient: AppTheme.heroGradient,
+                  borderRadius: BorderRadius.circular(10)),
+              child: Row(mainAxisSize: MainAxisSize.min, children: [
+                Text('Open Allocator', style: GoogleFonts.plusJakartaSans(
+                    fontSize: 12.5, fontWeight: FontWeight.w700, color: Colors.white)),
+                const SizedBox(width: 8),
+                const Icon(Icons.arrow_forward_rounded, size: 15, color: Colors.white),
+              ]),
+            ),
+          ),
+        ]),
+      ]),
+    );
+  }
 
   Widget _summaryBar(BuildContext ctx, DataEntryViewModel vm) {
     final auto   = vm.assignments.where((a) => a.autoAssigned).length;
@@ -530,7 +552,7 @@ class _CommandCenter extends StatelessWidget {
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
         Row(children: [
           Container(width: 3, height: 14,
-              decoration: BoxDecoration(gradient: AppTheme.violetGradient,
+              decoration: BoxDecoration(gradient: AppTheme.blueGradient,
                   borderRadius: BorderRadius.circular(2))),
           const SizedBox(width: 10),
           Text('Assignment Summary', style: GoogleFonts.plusJakartaSans(
@@ -538,9 +560,9 @@ class _CommandCenter extends StatelessWidget {
         ]),
         const SizedBox(height: 14),
         Row(children: [
-          _SumItem('Total',         '${vm.assignments.length}', AppTheme.accentViolet),
+          _SumItem('Total',         '${vm.assignments.length}', AppTheme.accentBlue),
           _divL(ctx), _SumItem('Auto',   '$auto',   AppTheme.accentCyan),
-          _divL(ctx), _SumItem('Manual', '$manual', AppTheme.accentViolet),
+          _divL(ctx), _SumItem('Manual', '$manual', AppTheme.accentBlue),
           _divL(ctx), _SumItem('Teachers Used', '$unique', AppTheme.accentTeal),
         ]),
       ]),
@@ -552,54 +574,46 @@ class _CommandCenter extends StatelessWidget {
 
   Widget _howItWorks(BuildContext ctx) {
     final steps = [
-      (Icons.person_add_rounded,   AppTheme.accentCyan,   'Add Faculty and Courses',
-          'Add teachers, courses and classes in Manage Data.'),
-      (Icons.meeting_room_rounded, AppTheme.accentAmber,  'Set Up Rooms and Periods',
-          'Add rooms with their type, and configure time slot periods.'),
-      (Icons.account_tree_rounded, AppTheme.accentViolet, 'Assign Slots',
-          'Use Auto or Manual mode in the Allocator to assign days and periods.'),
-      (Icons.play_circle_rounded,  AppTheme.accentTeal,   'Validate and View',
-          'Run the clash validator, then view the clash-free matrix.'),
+      (LucideIcons.userPlus, AppTheme.accentCyan,  'Add faculty and courses'),
+      (LucideIcons.clock,    AppTheme.accentAmber, 'Set up rooms and periods'),
+      (LucideIcons.workflow, AppTheme.accentBlue,  'Assign slots in the Allocator'),
+      (LucideIcons.listChecks, AppTheme.accentTeal,'Validate and view the matrix'),
     ];
 
     Widget stepTile(int i) {
       final s = steps[i];
-      return Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        Container(width: 36, height: 36,
-            decoration: BoxDecoration(color: s.$2.withValues(alpha: .12),
-                borderRadius: BorderRadius.circular(10),
-                border: Border.all(color: s.$2.withValues(alpha: .3))),
-            child: Icon(s.$1, color: s.$2, size: 16)),
-        const SizedBox(width: 12),
-        Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          const SizedBox(height: 6),
-          Text('Step ${i+1}: ${s.$3}', style: GoogleFonts.plusJakartaSans(
-              fontWeight: FontWeight.w700, color: ctx._tp, fontSize: 12)),
-          const SizedBox(height: 2),
-          Text(s.$4, style: GoogleFonts.plusJakartaSans(
-              color: ctx._ts, fontSize: 11, height: 1.5)),
-        ])),
-      ]);
+      return Padding(
+        padding: EdgeInsets.only(bottom: i == steps.length - 1 ? 0 : 14),
+        child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Container(width: 24, height: 24,
+              decoration: BoxDecoration(color: s.$2.withValues(alpha: .12),
+                  borderRadius: BorderRadius.circular(7)),
+              alignment: Alignment.center,
+              child: Icon(s.$1, size: 13, color: s.$2)),
+          const SizedBox(width: 10),
+          Expanded(child: Padding(
+            padding: const EdgeInsets.only(top: 2),
+            child: Text(s.$3, style: GoogleFonts.plusJakartaSans(
+                color: ctx._ts, fontSize: 11.5, height: 1.4, fontWeight: FontWeight.w500)),
+          )),
+        ]),
+      );
     }
 
     return Container(
-      padding: const EdgeInsets.all(24),
-      decoration: ctx._glassC(r: 18),
+      padding: const EdgeInsets.all(22),
+      decoration: BoxDecoration(
+        color: ctx._dk ? AppTheme.bgCard : Colors.white,
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: ctx._dk ? AppTheme.divider : const Color(0xFFE6E9F0)),
+        boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: ctx._dk ? .3 : .04),
+            blurRadius: 10, offset: const Offset(0, 6))],
+      ),
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        Row(children: [
-          Container(width: 4, height: 16,
-              decoration: BoxDecoration(gradient: AppTheme.cyanGradient,
-                  borderRadius: BorderRadius.circular(2))),
-          const SizedBox(width: 10),
-          Text('How It Works', style: GoogleFonts.plusJakartaSans(
-              fontSize: 14, fontWeight: FontWeight.w700, color: ctx._tp)),
-        ]),
-        const SizedBox(height: 18),
-        Row(children: [
-          Expanded(child: Column(children: [stepTile(0), const SizedBox(height: 16), stepTile(1)])),
-          const SizedBox(width: 24),
-          Expanded(child: Column(children: [stepTile(2), const SizedBox(height: 16), stepTile(3)])),
-        ]),
+        Text('How It Works', style: GoogleFonts.plusJakartaSans(
+            fontSize: 12.5, fontWeight: FontWeight.w700, color: ctx._tp)),
+        const SizedBox(height: 16),
+        ...List.generate(steps.length, stepTile),
       ]),
     );
   }
@@ -609,16 +623,20 @@ class _CommandCenter extends StatelessWidget {
 // Stat Card
 // ─────────────────────────────────────────────────────────────────────────────
 class _StatCard extends StatelessWidget {
-  final IconData icon; final LinearGradient gradient;
+  final IconData icon;
   final Color glow; final String label; final int value;
   final VoidCallback onTap;
-  const _StatCard({required this.icon, required this.gradient,
-      required this.glow, required this.label, required this.value, required this.onTap});
+  // The one metric worth drawing the eye to (Assignments) renders as a
+  // solid brand-gradient tile instead of a flat tint — a single deliberate
+  // accent among six calm cards, not six competing colors.
+  final bool highlight;
+  const _StatCard({required this.icon, required this.glow, required this.label,
+      required this.value, required this.onTap, this.highlight = false});
 
   @override
   Widget build(BuildContext context) {
     final dark = Theme.of(context).brightness == Brightness.dark;
-    const p    = 16.0;
+    final onGrad = highlight ? Colors.white : null;
     return TweenAnimationBuilder<double>(
       tween: Tween(begin: 0, end: value.toDouble()),
       duration: const Duration(milliseconds: 700),
@@ -626,31 +644,34 @@ class _StatCard extends StatelessWidget {
       builder: (_, v, __) => GestureDetector(
         onTap: onTap,
         child: Container(
-          padding: EdgeInsets.all(p),
-          decoration: dark
-              ? AppTheme.glowCard(glow, radius: 14)
-              : AppTheme.glowCardLight(glow, radius: 14),
+          padding: const EdgeInsets.all(16),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(16),
+            gradient: highlight ? AppTheme.heroGradient : null,
+            color: highlight ? null : (dark ? AppTheme.bgCard : Colors.white),
+            border: highlight ? null : Border.all(
+                color: dark ? AppTheme.divider : const Color(0xFFE6E9F0)),
+            boxShadow: [BoxShadow(
+                color: (highlight ? AppTheme.accentBlue : Colors.black)
+                    .withValues(alpha: highlight ? .28 : (dark ? .3 : .04)),
+                blurRadius: highlight ? 20 : 10, offset: const Offset(0, 6))],
+          ),
           child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
-            Container(width: 32, height: 32,
-                decoration: BoxDecoration(gradient: gradient,
-                    borderRadius: BorderRadius.circular(9),
-                    boxShadow: [BoxShadow(color: glow.withValues(alpha: .4),
-                        blurRadius: 8, offset: const Offset(0,3))]),
-                child: Icon(icon, color: Colors.white, size: 16)),
-            ShaderMask(shaderCallback: (b) => gradient.createShader(b),
-                child: Text(v.toInt().toString(), style: GoogleFonts.plusJakartaSans(
-                    fontSize: 26, fontWeight: FontWeight.w900,
-                    color: Colors.white, letterSpacing: -0.5))),
+            Container(width: 30, height: 30,
+                decoration: BoxDecoration(
+                    color: onGrad?.withValues(alpha: .2) ?? glow.withValues(alpha: .12),
+                    borderRadius: BorderRadius.circular(9)),
+                child: Icon(icon, color: onGrad ?? glow, size: 17)),
+            const SizedBox(height: 18),
+            Text(v.toInt().toString(), style: GoogleFonts.plusJakartaSans(
+                fontSize: 24, fontWeight: FontWeight.w800, letterSpacing: -0.5,
+                color: onGrad ?? (dark ? AppTheme.textPrimary : AppTheme.lightText))),
+            const SizedBox(height: 2),
+            Text(label, style: GoogleFonts.plusJakartaSans(
+                fontSize: 11, fontWeight: FontWeight.w600,
+                color: onGrad?.withValues(alpha: .85) ??
+                    (dark ? AppTheme.textSecondary : AppTheme.lightTextSec))),
           ]),
-          const SizedBox(height: 8),
-          Text(label, style: GoogleFonts.plusJakartaSans(
-              fontSize: 10, fontWeight: FontWeight.w600, letterSpacing: .3,
-              color: dark ? AppTheme.textSecondary : AppTheme.lightTextSec)),
-          const SizedBox(height: 6),
-          Container(height: 2, decoration: BoxDecoration(gradient: gradient,
-              borderRadius: BorderRadius.circular(2))),
-        ]),
         ),
       ),
     );

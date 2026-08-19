@@ -567,7 +567,7 @@ class _MatrixScreenState extends State<MatrixScreen>
                 ),
                 borderRadius: BorderRadius.circular(14),
                 boxShadow: [BoxShadow(color: (allocVm.gaOptimised
-                    ? AppTheme.accentViolet : AppTheme.accentTeal).withValues(alpha: .4),
+                    ? AppTheme.accentBlue : AppTheme.accentTeal).withValues(alpha: .4),
                     blurRadius: 18, offset: const Offset(0,5))]),
             child: Icon(
                 allocVm.gaOptimised ? Icons.psychology_rounded : Icons.grid_view_rounded,
@@ -589,16 +589,16 @@ class _MatrixScreenState extends State<MatrixScreen>
               padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
               decoration: BoxDecoration(
                 color: (_level != null || _classFilter != null)
-                    ? AppTheme.accentViolet.withValues(alpha: .12)
+                    ? AppTheme.accentBlue.withValues(alpha: .12)
                     : ctx._hd,
                 borderRadius: BorderRadius.circular(12),
                 border: Border.all(color: (_level != null || _classFilter != null)
-                    ? AppTheme.accentViolet.withValues(alpha: .5)
+                    ? AppTheme.accentBlue.withValues(alpha: .5)
                     : ctx._bd),
               ),
               child: Row(children: [
                 Icon(Icons.filter_list_rounded,
-                    color: (_level != null || _classFilter != null) ? AppTheme.accentViolet : ctx._ts,
+                    color: (_level != null || _classFilter != null) ? AppTheme.accentBlue : ctx._ts,
                     size: 16),
                 const SizedBox(width: 6),
                 Text(
@@ -610,12 +610,12 @@ class _MatrixScreenState extends State<MatrixScreen>
                           : _level == EducationLevel.bachelors ? 'Bachelors' : 'All Levels'),
                   style: GoogleFonts.plusJakartaSans(
                       fontWeight: FontWeight.w700,
-                      color: (_level != null || _classFilter != null) ? AppTheme.accentViolet : ctx._tp,
+                      color: (_level != null || _classFilter != null) ? AppTheme.accentBlue : ctx._tp,
                       fontSize: 12),
                 ),
                 const SizedBox(width: 2),
                 Icon(Icons.arrow_drop_down_rounded,
-                    color: (_level != null || _classFilter != null) ? AppTheme.accentViolet : ctx._ts,
+                    color: (_level != null || _classFilter != null) ? AppTheme.accentBlue : ctx._ts,
                     size: 16),
               ]),
             ),
@@ -756,7 +756,7 @@ class _MatrixScreenState extends State<MatrixScreen>
     final cd  = isDark ? const Color(0xFF1E293B) : Colors.white;
     final bd  = isDark ? const Color(0xFF334155) : const Color(0xFFE2E8F0);
     final ts  = isDark ? const Color(0xFF94A3B8) : const Color(0xFF64748B);
-    const violet = AppTheme.accentViolet;
+    const blue = AppTheme.accentBlue;
     const cyan   = AppTheme.accentCyan;
 
     EducationLevel? tmpLevel   = _level;
@@ -795,7 +795,7 @@ class _MatrixScreenState extends State<MatrixScreen>
                 children: [
                   // Header row
                   Row(children: [
-                    Icon(Icons.filter_list_rounded, size: 15, color: violet),
+                    Icon(Icons.filter_list_rounded, size: 15, color: blue),
                     const SizedBox(width: 6),
                     Text('Filter', style: GoogleFonts.plusJakartaSans(
                         fontWeight: FontWeight.w800, fontSize: 14, color: isDark ? Colors.white : const Color(0xFF0F172A))),
@@ -803,7 +803,7 @@ class _MatrixScreenState extends State<MatrixScreen>
                     if (tmpLevel != null || tmpClass != null)
                       GestureDetector(
                         onTap: () { setSt(() { tmpLevel = null; tmpClass = null; }); setState(() { _level = null; _classFilter = null; }); Navigator.pop(bCtx); },
-                        child: Text('Clear', style: GoogleFonts.plusJakartaSans(fontSize: 12, fontWeight: FontWeight.w700, color: violet)),
+                        child: Text('Clear', style: GoogleFonts.plusJakartaSans(fontSize: 12, fontWeight: FontWeight.w700, color: blue)),
                       ),
                     const SizedBox(width: 8),
                     GestureDetector(
@@ -817,12 +817,12 @@ class _MatrixScreenState extends State<MatrixScreen>
                   Text('LEVEL', style: GoogleFonts.plusJakartaSans(fontSize: 9, fontWeight: FontWeight.w800, color: ts, letterSpacing: 1.2)),
                   const SizedBox(height: 6),
                   Row(children: [
-                    _filterChip(bCtx, 'All', tmpLevel == null, violet, isDark, () {
+                    _filterChip(bCtx, 'All', tmpLevel == null, blue, isDark, () {
                       setSt(() { tmpLevel = null; tmpClass = null; });
                       setState(() { _level = null; _classFilter = null; });
                     }),
                     const SizedBox(width: 6),
-                    _filterChip(bCtx, 'Intermediate', tmpLevel == EducationLevel.intermediate, violet, isDark, () {
+                    _filterChip(bCtx, 'Intermediate', tmpLevel == EducationLevel.intermediate, blue, isDark, () {
                       setSt(() { tmpLevel = EducationLevel.intermediate; tmpClass = null; });
                       setState(() { _level = EducationLevel.intermediate; _classFilter = null; });
                     }),
@@ -842,13 +842,13 @@ class _MatrixScreenState extends State<MatrixScreen>
                       child: Wrap(
                         spacing: 6, runSpacing: 6,
                         children: [
-                          _filterChip(bCtx, 'All Classes', tmpClass == null, violet, isDark, () {
+                          _filterChip(bCtx, 'All Classes', tmpClass == null, blue, isDark, () {
                             setSt(() => tmpClass = null);
                             setState(() => _classFilter = null);
                           }),
                           ...visibleClasses.map((c) {
                             final isBach = c.level == EducationLevel.bachelors;
-                            return _filterChip(bCtx, _classChipLabel(dataVm, c), tmpClass == c.id, isBach ? cyan : violet, isDark, () {
+                            return _filterChip(bCtx, _classChipLabel(dataVm, c), tmpClass == c.id, isBach ? cyan : blue, isDark, () {
                               setSt(() => tmpClass = c.id);
                               setState(() => _classFilter = c.id);
                             });
@@ -928,7 +928,7 @@ class _MatrixScreenState extends State<MatrixScreen>
           label: 'Teacher-wise',
           sublabel: 'View timetable by teachers',
           selected: _view == _MatrixView.teacherDay,
-          color: AppTheme.accentViolet,
+          color: AppTheme.accentBlue,
           onTap: () => setState(() => _view = _MatrixView.teacherDay)),
       _ViewTab(
           icon: Icons.meeting_room_rounded,
@@ -974,11 +974,11 @@ class _MatrixScreenState extends State<MatrixScreen>
         Container(
           width: 56, height: 56,
           decoration: BoxDecoration(
-            color: AppTheme.accentViolet.withValues(alpha: .12),
+            color: AppTheme.accentBlue.withValues(alpha: .12),
             shape: BoxShape.circle,
           ),
           child: const Icon(Icons.search_off_rounded,
-              size: 28, color: AppTheme.accentViolet),
+              size: 28, color: AppTheme.accentBlue),
         ),
         const SizedBox(height: 14),
         Text('No results',
@@ -1386,7 +1386,7 @@ class _MatrixScreenState extends State<MatrixScreen>
               final isClash = group.any((x) => clashingAssignmentIds.contains(x.id));
               final col = isClash ? AppTheme.error
                   : a.classModel.level == EducationLevel.bachelors
-                      ? AppTheme.accentCyan : AppTheme.accentViolet;
+                      ? AppTheme.accentCyan : AppTheme.accentBlue;
               final allDays = group.expand((x) => x.occupiedSlots).toSet().toList()..sort();
               return Container(
                 margin: const EdgeInsets.all(3),
@@ -1443,7 +1443,7 @@ class _MatrixScreenState extends State<MatrixScreen>
             if (lead > 0)   SizedBox(width: lead, child: showSlots ? Container(decoration: BoxDecoration(border: Border(bottom: BorderSide(color: ctx._dv, width: 1)))) : null),
             ...slots.map((ts) => showSlots
                 ? assignCell(ts, pMap[ts.id] ?? [], eg: egMap?[ts.id], samePrev: mergeMap?[ts.id]?['prev'] ?? false, sameNext: mergeMap?[ts.id]?['next'] ?? false, span: mergeMap?[ts.id]?['span'] ?? 1, indexInGroup: mergeMap?[ts.id]?['indexInGroup'] ?? 0)
-                : periodHeader(ts, ts.level == EducationLevel.bachelors ? AppTheme.accentCyan : AppTheme.accentViolet)),
+                : periodHeader(ts, ts.level == EducationLevel.bachelors ? AppTheme.accentCyan : AppTheme.accentBlue)),
             if (trail > 0)  SizedBox(width: trail, child: showSlots ? Container(decoration: BoxDecoration(border: Border(bottom: BorderSide(color: ctx._dv, width: 1)))) : null),
           ]),
         );
@@ -1465,7 +1465,7 @@ class _MatrixScreenState extends State<MatrixScreen>
               if (programName.isNotEmpty)
                 Text(programName, style: GoogleFonts.plusJakartaSans(
                     fontWeight: FontWeight.w800,
-                    color: isBach ? AppTheme.accentCyan : AppTheme.accentViolet,
+                    color: isBach ? AppTheme.accentCyan : AppTheme.accentBlue,
                     fontSize: 10), overflow: TextOverflow.ellipsis, maxLines: 1),
               Text(classModel.name, style: GoogleFonts.plusJakartaSans(
                   fontWeight: FontWeight.w700, color: ctx._tp, fontSize: 11),
@@ -1513,11 +1513,11 @@ class _MatrixScreenState extends State<MatrixScreen>
                         timelineRow(bachSlots, {}, showSlots: false),
                       ])),
                     if (interSlots.isNotEmpty)
-                      Container(color: AppTheme.accentViolet.withValues(alpha: .07), child: Row(children: [
+                      Container(color: AppTheme.accentBlue.withValues(alpha: .07), child: Row(children: [
                         SizedBox(width: rowLblW, child: Padding(
                             padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
                             child: Text('Inter', style: GoogleFonts.plusJakartaSans(
-                                fontWeight: FontWeight.w800, fontSize: 10, color: AppTheme.accentViolet)))),
+                                fontWeight: FontWeight.w800, fontSize: 10, color: AppTheme.accentBlue)))),
                         timelineRow(interSlots, {}, showSlots: false),
                       ])),
                   ],
@@ -1777,7 +1777,7 @@ class _MatrixScreenState extends State<MatrixScreen>
             final effectiveClash = clashing;
             final col      = effectiveClash ? AppTheme.error
                 : isElective ? AppTheme.accentAmber
-                : (isBach ? AppTheme.accentCyan : AppTheme.accentViolet);
+                : (isBach ? AppTheme.accentCyan : AppTheme.accentBlue);
             final allDays  = group.expand((x) => x.occupiedSlots).toSet().toList()..sort();
             return Container(
               margin: const EdgeInsets.all(3),
@@ -1902,7 +1902,7 @@ class _MatrixScreenState extends State<MatrixScreen>
                         child: Text('Room', style: GoogleFonts.plusJakartaSans(
                             fontWeight: FontWeight.w700, fontSize: 11, color: ctx._ts)))),
                     ...headerRow(filteredSlots,
-                        _level == EducationLevel.bachelors ? AppTheme.accentCyan : AppTheme.accentViolet),
+                        _level == EducationLevel.bachelors ? AppTheme.accentCyan : AppTheme.accentBlue),
                   ])),
                 ] else ...[
                   // Row 1: Bachelors (cyan)
@@ -1914,14 +1914,14 @@ class _MatrixScreenState extends State<MatrixScreen>
                               fontWeight: FontWeight.w800, fontSize: 10, color: AppTheme.accentCyan)))),
                       ...headerRow(bachSlots, AppTheme.accentCyan),
                     ])),
-                  // Row 2: Intermediate (violet)
+                  // Row 2: Intermediate (blue)
                   if (interSlots.isNotEmpty)
-                    Container(color: AppTheme.accentViolet.withValues(alpha: .07), child: Row(children: [
+                    Container(color: AppTheme.accentBlue.withValues(alpha: .07), child: Row(children: [
                       SizedBox(width: rowLblW, child: Padding(
                           padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
                           child: Text('Inter', style: GoogleFonts.plusJakartaSans(
-                              fontWeight: FontWeight.w800, fontSize: 10, color: AppTheme.accentViolet)))),
-                      ...headerRow(interSlots, AppTheme.accentViolet),
+                              fontWeight: FontWeight.w800, fontSize: 10, color: AppTheme.accentBlue)))),
+                      ...headerRow(interSlots, AppTheme.accentBlue),
                     ])),
                 ],
                 Divider(color: ctx._dv, height: 1),
@@ -1941,7 +1941,7 @@ class _MatrixScreenState extends State<MatrixScreen>
                     child: Row(children: [
                       Container(width: 26, height: 26,
                           decoration: BoxDecoration(
-                              gradient: AppTheme.violetGradient,
+                              gradient: AppTheme.blueGradient,
                               borderRadius: BorderRadius.circular(8)),
                           child: Center(child: Text(
                               realRoomName.isNotEmpty ? realRoomName[0].toUpperCase() : '?',
@@ -2185,7 +2185,7 @@ class _MatrixScreenState extends State<MatrixScreen>
             final effectiveClash = clashing;
             final col      = effectiveClash ? AppTheme.error
                 : isElective ? AppTheme.accentAmber
-                : (isBach ? AppTheme.accentCyan : AppTheme.accentViolet);
+                : (isBach ? AppTheme.accentCyan : AppTheme.accentBlue);
             final allDays  = group.expand((x) => x.occupiedSlots).toSet().toList()..sort();
             return Container(
               margin: const EdgeInsets.all(3),
@@ -2299,7 +2299,7 @@ class _MatrixScreenState extends State<MatrixScreen>
                         child: Text('Teacher', style: GoogleFonts.plusJakartaSans(
                             fontWeight: FontWeight.w700, fontSize: 11, color: ctx._ts)))),
                     ...headerRow(filteredSlots,
-                        _level == EducationLevel.bachelors ? AppTheme.accentCyan : AppTheme.accentViolet),
+                        _level == EducationLevel.bachelors ? AppTheme.accentCyan : AppTheme.accentBlue),
                   ])),
                 ] else ...[
                   // Row 1: Bachelors (cyan)
@@ -2311,14 +2311,14 @@ class _MatrixScreenState extends State<MatrixScreen>
                               fontWeight: FontWeight.w800, fontSize: 10, color: AppTheme.accentCyan)))),
                       ...headerRow(bachSlots, AppTheme.accentCyan),
                     ])),
-                  // Row 2: Intermediate (violet)
+                  // Row 2: Intermediate (blue)
                   if (interSlots.isNotEmpty)
-                    Container(color: AppTheme.accentViolet.withValues(alpha: .07), child: Row(children: [
+                    Container(color: AppTheme.accentBlue.withValues(alpha: .07), child: Row(children: [
                       SizedBox(width: rowLblW, child: Padding(
                           padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
                           child: Text('Inter', style: GoogleFonts.plusJakartaSans(
-                              fontWeight: FontWeight.w800, fontSize: 10, color: AppTheme.accentViolet)))),
-                      ...headerRow(interSlots, AppTheme.accentViolet),
+                              fontWeight: FontWeight.w800, fontSize: 10, color: AppTheme.accentBlue)))),
+                      ...headerRow(interSlots, AppTheme.accentBlue),
                     ])),
                 ],
                 Divider(color: ctx._dv, height: 1),
@@ -2338,7 +2338,7 @@ class _MatrixScreenState extends State<MatrixScreen>
                     child: Row(children: [
                       Container(width: 26, height: 26,
                           decoration: BoxDecoration(
-                              gradient: AppTheme.violetGradient,
+                              gradient: AppTheme.blueGradient,
                               borderRadius: BorderRadius.circular(8)),
                           child: Center(child: Text(
                               realRoomName.isNotEmpty ? realRoomName[0].toUpperCase() : '?',
@@ -3326,7 +3326,7 @@ class _TeacherTransferDialogState extends State<_TeacherTransferDialog> {
             ...periods.map((a) {
               final pickIndex = _swapSelected.indexOf(a.id);
               final isPicked = pickIndex != -1;
-              final pickColor = pickIndex == 0 ? orange : AppTheme.accentViolet;
+              final pickColor = pickIndex == 0 ? orange : AppTheme.accentBlue;
               return Padding(
                 padding: const EdgeInsets.only(bottom: 8),
                 child: GestureDetector(
@@ -3418,13 +3418,13 @@ class _SearchBar extends StatelessWidget {
         borderRadius: BorderRadius.circular(12),
         border: Border.all(
           color: query.isNotEmpty
-              ? AppTheme.accentViolet.withValues(alpha: .5)
+              ? AppTheme.accentBlue.withValues(alpha: .5)
               : bd,
         ),
         boxShadow: query.isNotEmpty
             ? [
                 BoxShadow(
-                  color: AppTheme.accentViolet.withValues(alpha: .1),
+                  color: AppTheme.accentBlue.withValues(alpha: .1),
                   blurRadius: 8,
                   offset: const Offset(0, 2),
                 )
@@ -3437,7 +3437,7 @@ class _SearchBar extends StatelessWidget {
           Icon(
             Icons.search_rounded,
             size: 18,
-            color: query.isNotEmpty ? AppTheme.accentViolet : ts,
+            color: query.isNotEmpty ? AppTheme.accentBlue : ts,
           ),
           const SizedBox(width: 8),
           Expanded(
@@ -3464,11 +3464,11 @@ class _SearchBar extends StatelessWidget {
                   width: 20,
                   height: 20,
                   decoration: BoxDecoration(
-                    color: AppTheme.accentViolet.withValues(alpha: .15),
+                    color: AppTheme.accentBlue.withValues(alpha: .15),
                     shape: BoxShape.circle,
                   ),
                   child: const Icon(Icons.close_rounded,
-                      size: 12, color: AppTheme.accentViolet),
+                      size: 12, color: AppTheme.accentBlue),
                 ),
               ),
             ),

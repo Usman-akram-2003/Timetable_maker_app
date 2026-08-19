@@ -238,7 +238,7 @@ class _GaReportSheetState extends State<_GaReportSheet>
                         Container(
                           width: 4, height: 16,
                           decoration: BoxDecoration(
-                            color: AppTheme.accentViolet,
+                            color: AppTheme.accentBlue,
                             borderRadius: BorderRadius.circular(2),
                           ),
                         ),

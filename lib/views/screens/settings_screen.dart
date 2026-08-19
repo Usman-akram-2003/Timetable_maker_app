@@ -150,11 +150,11 @@ class SettingsScreen extends StatelessWidget {
               const SizedBox(height: 20),
 
               // ── Appearance ─────────────────────────────────────────────────
-              _SectionLabel('Appearance', Icons.palette_rounded, AppTheme.accentViolet, context),
+              _SectionLabel('Appearance', Icons.palette_rounded, AppTheme.accentBlue, context),
               const SizedBox(height: 12),
               _card(context, child: _ToggleRow(
                 icon: isDark ? Icons.dark_mode_rounded : Icons.light_mode_rounded,
-                iconColor: AppTheme.accentViolet,
+                iconColor: AppTheme.accentBlue,
                 title: 'Dark Mode',
                 subtitle: isDark ? 'Dark theme is active' : 'Light theme is active',
                 value: isDark,
@@ -234,7 +234,7 @@ class SettingsScreen extends StatelessWidget {
                 label: 'Combined Courses',
                 color: context.watch<SettingsViewModel>().scheduleLocked
                     ? const Color(0xFFEF4444)
-                    : AppTheme.accentViolet,
+                    : AppTheme.accentBlue,
                 badgeCount: context.watch<DataEntryViewModel>().combinedRules.length,
                 lockedMessage: context.watch<SettingsViewModel>().scheduleLocked
                     ? 'Schedule is locked. Unlock in settings to modify combined courses.'
@@ -1138,7 +1138,7 @@ class _CombinedCoursesSectionState extends State<_CombinedCoursesSection> {
                 child: DropdownButtonHideUnderline(
                   child: DropdownButton<String>(
                     value: null,
-                    hint: Text('${_selClassIds.length} Classes Selected', style: GoogleFonts.plusJakartaSans(fontSize: 12, color: _selClassIds.isNotEmpty ? AppTheme.accentViolet : context._ts)),
+                    hint: Text('${_selClassIds.length} Classes Selected', style: GoogleFonts.plusJakartaSans(fontSize: 12, color: _selClassIds.isNotEmpty ? AppTheme.accentBlue : context._ts)),
                     dropdownColor: context._bg,
                     icon: Icon(Icons.arrow_drop_down, color: context._ts),
                     items: vm.classes.map((c) {
@@ -1149,7 +1149,7 @@ class _CombinedCoursesSectionState extends State<_CombinedCoursesSection> {
                         value: c.id,
                         child: Row(
                           children: [
-                            Icon(isSelected ? Icons.check_box_rounded : Icons.check_box_outline_blank_rounded, color: isSelected ? AppTheme.accentViolet : context._ts, size: 18),
+                            Icon(isSelected ? Icons.check_box_rounded : Icons.check_box_outline_blank_rounded, color: isSelected ? AppTheme.accentBlue : context._ts, size: 18),
                             const SizedBox(width: 8),
                             Text(formattedName, style: GoogleFonts.plusJakartaSans(fontSize: 13, color: context._tp)),
                           ],
@@ -1214,7 +1214,7 @@ class _CombinedCoursesSectionState extends State<_CombinedCoursesSection> {
               icon: const Icon(Icons.add, size: 16, color: Colors.white),
               label: Text('Combine', style: GoogleFonts.plusJakartaSans(color: Colors.white, fontWeight: FontWeight.w700)),
               style: ElevatedButton.styleFrom(
-                backgroundColor: AppTheme.accentViolet,
+                backgroundColor: AppTheme.accentBlue,
                 padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
                 shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
                 elevation: 0,
@@ -1254,7 +1254,7 @@ class _CombinedCoursesSectionState extends State<_CombinedCoursesSection> {
               ),
               child: Row(
                 children: [
-                  Icon(Icons.link_rounded, size: 14, color: AppTheme.accentViolet),
+                  Icon(Icons.link_rounded, size: 14, color: AppTheme.accentBlue),
                   const SizedBox(width: 10),
                   Expanded(
                     child: Text(

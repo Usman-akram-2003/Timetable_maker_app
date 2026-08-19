@@ -193,7 +193,7 @@ class _SelectiveLockDialogState extends State<SelectiveLockDialog> {
               Flexible(
                 child: SingleChildScrollView(
                   child: Column(children: [
-                    _buildLevelSection(EducationLevel.bachelors, 'Bachelors', Icons.account_balance_rounded, AppTheme.accentViolet),
+                    _buildLevelSection(EducationLevel.bachelors, 'Bachelors', Icons.account_balance_rounded, AppTheme.accentBlue),
                     _buildLevelSection(EducationLevel.intermediate, 'Intermediate', Icons.school_rounded, AppTheme.accentTeal),
                   ]),
                 ),
@@ -203,7 +203,7 @@ class _SelectiveLockDialogState extends State<SelectiveLockDialog> {
                 alignment: Alignment.centerRight,
                 child: ElevatedButton(
                   style: ElevatedButton.styleFrom(
-                    backgroundColor: AppTheme.accentViolet,
+                    backgroundColor: AppTheme.accentBlue,
                     shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                     padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
                   ),

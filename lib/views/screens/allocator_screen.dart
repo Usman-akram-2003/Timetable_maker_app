@@ -320,7 +320,7 @@ class _AllocatorScreenState extends State<AllocatorScreen> {
           border: Border.all(color: bdCol),
         ),
         child: Column(children: [
-          const Icon(Icons.info_outline_rounded, color: AppTheme.accentViolet, size: 36),
+          const Icon(Icons.info_outline_rounded, color: AppTheme.accentBlue, size: 36),
           const SizedBox(height: 12),
           Text('Set up your data first',
               style: GoogleFonts.plusJakartaSans(
@@ -347,14 +347,14 @@ class _AllocatorScreenState extends State<AllocatorScreen> {
         Container(
           padding: const EdgeInsets.fromLTRB(18, 16, 18, 14),
           decoration: BoxDecoration(
-            color: AppTheme.accentViolet.withValues(alpha: .08),
+            color: AppTheme.accentBlue.withValues(alpha: .08),
             borderRadius: const BorderRadius.vertical(top: Radius.circular(18)),
             border: Border(bottom: BorderSide(color: bdCol)),
           ),
           child: Row(children: [
             Container(width: 32, height: 32,
                 decoration: BoxDecoration(
-                    gradient: AppTheme.violetGradient,
+                    gradient: AppTheme.blueGradient,
                     borderRadius: BorderRadius.circular(9)),
                 child: const Icon(Icons.add_rounded, color: Colors.white, size: 18)),
             const SizedBox(width: 12),
@@ -384,14 +384,14 @@ class _AllocatorScreenState extends State<AllocatorScreen> {
                 ),
                 child: Row(children: [
                   Icon(Icons.tune_rounded, size: 16,
-                      color: _showAdvanced ? AppTheme.accentViolet : ctx._tm),
+                      color: _showAdvanced ? AppTheme.accentBlue : ctx._tm),
                   const SizedBox(width: 8),
                   Expanded(child: Text(
                     _showAdvanced ? 'Hide advanced options'
                         : 'Advanced options — days & time',
                     style: GoogleFonts.plusJakartaSans(
                         fontSize: 12, fontWeight: FontWeight.w600,
-                        color: _showAdvanced ? AppTheme.accentViolet : ctx._ts),
+                        color: _showAdvanced ? AppTheme.accentBlue : ctx._ts),
                   )),
                   Icon(_showAdvanced
                       ? Icons.keyboard_arrow_up_rounded
@@ -408,7 +408,7 @@ class _AllocatorScreenState extends State<AllocatorScreen> {
               const SizedBox(height: 10),
               _step2Days(ctx, dataVm, allocVm),
               const SizedBox(height: 16),
-              _sectionLabel(ctx, 'Time Period', Icons.schedule_rounded, AppTheme.accentViolet),
+              _sectionLabel(ctx, 'Time Period', Icons.schedule_rounded, AppTheme.accentBlue),
               const SizedBox(height: 10),
               _step2Period(ctx, dataVm, periodClash),
             ],
@@ -459,9 +459,9 @@ class _AllocatorScreenState extends State<AllocatorScreen> {
 
   Widget _header(bool isDark) => Row(children: [
     Container(width: 48, height: 48,
-        decoration: BoxDecoration(gradient: AppTheme.violetGradient,
+        decoration: BoxDecoration(gradient: AppTheme.blueGradient,
             borderRadius: BorderRadius.circular(14),
-            boxShadow: [BoxShadow(color: AppTheme.accentViolet.withValues(alpha: .4),
+            boxShadow: [BoxShadow(color: AppTheme.accentBlue.withValues(alpha: .4),
                 blurRadius: 18, offset: const Offset(0,5))]),
         child: const Icon(Icons.account_tree_rounded, color: Colors.white, size: 24)),
     const SizedBox(width: 16),
@@ -477,13 +477,13 @@ class _AllocatorScreenState extends State<AllocatorScreen> {
 
   Widget _step1(BuildContext ctx, DataEntryViewModel dataVm) {
     if (dataVm.classes.isEmpty || dataVm.courses.isEmpty || dataVm.teachers.isEmpty) {
-      return _InfoBox(icon: Icons.info_outline_rounded, color: AppTheme.accentViolet,
+      return _InfoBox(icon: Icons.info_outline_rounded, color: AppTheme.accentBlue,
           text: 'Add classes, courses and teachers in Manage Data first.');
     }
     return Column(children: [
       _Drop<ClassModel>(key: ValueKey('class-${_class?.id}'),
           label: 'Class / Section', icon: Icons.school_rounded,
-          value: _class, color: AppTheme.accentViolet,
+          value: _class, color: AppTheme.accentBlue,
           items: { for (final c in dataVm.classes) c.id: c }.values.toList(),
           itemLabel: (c) => c.shortCode,
           onChanged: (v) => setState(() {
@@ -502,13 +502,13 @@ class _AllocatorScreenState extends State<AllocatorScreen> {
             : dataVm.courses.where((c) => c.level == _class!.level).toList();
         final cDrop = _Drop<Course>(key: ValueKey('course-${_course?.id}'),
             label: 'Course', icon: Icons.menu_book_outlined,
-            value: _course, color: AppTheme.accentViolet,
+            value: _course, color: AppTheme.accentBlue,
             items: { for (final c in coursesForClass) c.id: c }.values.toList(),
             itemLabel: (c) => '${c.name}  (${c.code})',
             onChanged: (v) => setState(() => _course = v));
         final tDrop = _Drop<Teacher>(key: ValueKey('teacher-${_teacher?.id}'),
             label: 'Teacher', icon: Icons.person_outline_rounded,
-            value: _teacher, color: AppTheme.accentViolet,
+            value: _teacher, color: AppTheme.accentBlue,
             items: { for (final t in dataVm.teachers) t.id: t }.values.toList(),
             itemLabel: (t) => t.name,
             onChanged: (v) => setState(() { _teacher = v; _resetSelections(); }));
@@ -525,7 +525,7 @@ class _AllocatorScreenState extends State<AllocatorScreen> {
         leftLabel: 'Auto', rightLabel: 'Manual',
         leftSub: 'AI picks best days', rightSub: 'Tap days yourself',
         isLeft: _autoDays,
-        leftColor: AppTheme.accentCyan, rightColor: AppTheme.accentViolet,
+        leftColor: AppTheme.accentCyan, rightColor: AppTheme.accentBlue,
         onLeft:  () => setState(() { _autoDays = true;  _selectedDays = {}; }),
         onRight: () => setState(() => _autoDays = false),
       ),
@@ -544,7 +544,7 @@ class _AllocatorScreenState extends State<AllocatorScreen> {
           workingDays: context.read<SettingsViewModel>().workingDays,
           occupiedDays: _busyDays(dataVm),
           selectedDays: _selectedDays,
-          color: AppTheme.accentViolet,
+          color: AppTheme.accentBlue,
           readOnly: false,
           onToggle: (day) => setState(() {
           if (_selectedDays.contains(day)) { _selectedDays.remove(day); }
@@ -645,7 +645,7 @@ class _AllocatorScreenState extends State<AllocatorScreen> {
         leftLabel: 'Auto', rightLabel: 'Manual',
         leftSub: 'AI picks best period', rightSub: 'Choose period yourself',
         isLeft: _autoPeriod,
-        leftColor: AppTheme.accentCyan, rightColor: AppTheme.accentViolet,
+        leftColor: AppTheme.accentCyan, rightColor: AppTheme.accentBlue,
         onLeft:  () => setState(() { _autoPeriod = true; _timeSlotId = null; }),
         onRight: () => setState(() => _autoPeriod = false),
       ),
@@ -658,7 +658,7 @@ class _AllocatorScreenState extends State<AllocatorScreen> {
           _autoPeriodPreview(dataVm),
       ] else ...[
         if (dataVm.timeSlots.isEmpty)
-          _InfoBox(icon: Icons.info_outline_rounded, color: AppTheme.accentViolet,
+          _InfoBox(icon: Icons.info_outline_rounded, color: AppTheme.accentBlue,
               text: 'No time slots yet. Add them in Manage Data and Time Slots.')
         else ...[
           Text('Select a time period', style: GoogleFonts.plusJakartaSans(
@@ -866,7 +866,7 @@ class _AllocatorScreenState extends State<AllocatorScreen> {
     return Row(children: [
       _Chip('Auto-selected', AppTheme.accentCyan, Icons.auto_awesome_rounded),
       const SizedBox(width: 8),
-      _Chip(freePeriod.label, AppTheme.accentViolet, Icons.schedule_rounded),
+      _Chip(freePeriod.label, AppTheme.accentBlue, Icons.schedule_rounded),
     ]);
   }
 
@@ -1256,11 +1256,11 @@ class _AllocatorScreenState extends State<AllocatorScreen> {
         child: Container(
             height: 50,
             decoration: BoxDecoration(
-                gradient: bothAuto ? AppTheme.cyanGradient : AppTheme.violetGradient,
+                gradient: bothAuto ? AppTheme.cyanGradient : AppTheme.blueGradient,
                 borderRadius: BorderRadius.circular(12),
                 boxShadow: [BoxShadow(
                     color: (bothAuto
-                        ? AppTheme.accentCyan : AppTheme.accentViolet).withValues(alpha: .4),
+                        ? AppTheme.accentCyan : AppTheme.accentBlue).withValues(alpha: .4),
                     blurRadius: 14, offset: const Offset(0,4))]),
             child: Row(mainAxisAlignment: MainAxisAlignment.center, children: [
               Icon(bothAuto ? Icons.auto_awesome_rounded : Icons.add_link_rounded,
@@ -1393,12 +1393,12 @@ class _AllocatorScreenState extends State<AllocatorScreen> {
               color: ctx._dk ? const Color(0xFF0F172A) : const Color(0xFFF1F5F9),
               borderRadius: BorderRadius.circular(20),
               border: Border.all(color: searchActive
-                  ? AppTheme.accentViolet.withValues(alpha: .5)
+                  ? AppTheme.accentBlue.withValues(alpha: .5)
                   : (ctx._dk ? AppTheme.divider : AppTheme.lightDivider)),
             ),
             child: Row(children: [
               Icon(Icons.search_rounded, size: 16,
-                  color: searchActive ? AppTheme.accentViolet : ctx._ts),
+                  color: searchActive ? AppTheme.accentBlue : ctx._ts),
               const SizedBox(width: 8),
               Expanded(
                 child: TextField(
@@ -1443,13 +1443,13 @@ class _AllocatorScreenState extends State<AllocatorScreen> {
         ),
         const SizedBox(width: 8),
         Container(padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-            decoration: BoxDecoration(color: AppTheme.accentViolet.withValues(alpha: .1),
+            decoration: BoxDecoration(color: AppTheme.accentBlue.withValues(alpha: .1),
                 borderRadius: BorderRadius.circular(20),
-                border: Border.all(color: AppTheme.accentViolet.withValues(alpha: .3))),
+                border: Border.all(color: AppTheme.accentBlue.withValues(alpha: .3))),
             child: Text(
                 searchActive ? '$filteredCount / ${vm.assignments.length}' : '${vm.assignments.length} total',
                 style: GoogleFonts.plusJakartaSans(
-                fontWeight: FontWeight.w700, color: AppTheme.accentViolet, fontSize: 11))),
+                fontWeight: FontWeight.w700, color: AppTheme.accentBlue, fontSize: 11))),
       ]);
   }
 
@@ -2529,7 +2529,7 @@ class _PeriodGrid extends StatelessWidget {
       children: timeSlots.map((ts) {
         final sel  = selectedId == ts.id;
         final busy = busyIds.contains(ts.id);
-        final col  = busy ? AppTheme.error : AppTheme.accentViolet;
+        final col  = busy ? AppTheme.error : AppTheme.accentBlue;
         return GestureDetector(
           onTap: busy ? null : () => onSelect(ts.id),
           child: AnimatedContainer(
@@ -2608,7 +2608,7 @@ class _RoomGrid extends StatelessWidget {
         final busy = busyIds.contains(r.id);
         final col  = busy ? AppTheme.error
             : r.type == RoomType.room ? AppTheme.accentTeal
-            : r.type == RoomType.hall ? AppTheme.accentViolet : AppTheme.accentAmber;
+            : r.type == RoomType.hall ? AppTheme.accentBlue : AppTheme.accentAmber;
         return GestureDetector(
           onTap: busy ? null : () => onSelect(r.id),
           child: AnimatedContainer(
@@ -2665,22 +2665,22 @@ class _DaysSummary extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
       decoration: BoxDecoration(
-          color: AppTheme.accentViolet.withValues(alpha: .08),
+          color: AppTheme.accentBlue.withValues(alpha: .08),
           borderRadius: BorderRadius.circular(12),
-          border: Border.all(color: AppTheme.accentViolet.withValues(alpha: .35), width: 1.5)),
+          border: Border.all(color: AppTheme.accentBlue.withValues(alpha: .35), width: 1.5)),
       child: Row(children: [
-        Icon(Icons.check_circle_outline_rounded, color: AppTheme.accentViolet, size: 18),
+        Icon(Icons.check_circle_outline_rounded, color: AppTheme.accentBlue, size: 18),
         const SizedBox(width: 10),
         Text('${sorted.length} day${sorted.length == 1 ? '' : 's'} selected  - ',
             style: GoogleFonts.plusJakartaSans(fontWeight: FontWeight.w700,
-                fontSize: 13, color: AppTheme.accentViolet)),
+                fontSize: 13, color: AppTheme.accentBlue)),
         Wrap(spacing: 4, children: sorted.map((d) => Container(
             padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-            decoration: BoxDecoration(color: AppTheme.accentViolet.withValues(alpha: .18),
+            decoration: BoxDecoration(color: AppTheme.accentBlue.withValues(alpha: .18),
                 borderRadius: BorderRadius.circular(6)),
             child: Text(_short[d-1], style: GoogleFonts.plusJakartaSans(
                 fontSize: 11, fontWeight: FontWeight.w800,
-                color: AppTheme.accentViolet)))).toList()),
+                color: AppTheme.accentBlue)))).toList()),
       ]),
     );
   }
@@ -2753,7 +2753,7 @@ class _AssignmentTile extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
-    final col = assignment.startSlot <= 3 ? AppTheme.accentCyan : AppTheme.accentViolet;
+    final col = assignment.startSlot <= 3 ? AppTheme.accentCyan : AppTheme.accentBlue;
     final ts  = timeSlots.where((t) => t.id == assignment.timeSlotId)
         .map((t) => t.label).firstOrNull ?? assignment.timeSlotId;
     final rm  = assignment.hasRoom
@@ -2801,7 +2801,7 @@ class _AssignmentTile extends StatelessWidget {
           const SizedBox(height: 10),
           Wrap(spacing: 6, runSpacing: 6, children: [
             _Chip(assignment.daysLabel, col, Icons.calendar_today_rounded),
-            _Chip(ts, AppTheme.accentViolet, Icons.schedule_rounded),
+            _Chip(ts, AppTheme.accentBlue, Icons.schedule_rounded),
             if (rm != null) _Chip('Rm $rm', AppTheme.accentAmber, Icons.meeting_room_rounded),
             if (assignment.autoAssigned) _Chip('Auto', AppTheme.accentCyan, Icons.auto_awesome_rounded),
           ]),
@@ -3029,7 +3029,7 @@ class _GaPanel extends StatelessWidget {
       case GaStatus.running:
         return _progressBody(
             'AI is generating your timetable…\nThis may take a few seconds.',
-            AppTheme.accentViolet, ts);
+            AppTheme.accentBlue, ts);
       case GaStatus.failed:
         return _failedBody(ts, tm);
       case GaStatus.done:
@@ -3041,7 +3041,7 @@ class _GaPanel extends StatelessWidget {
     crossAxisAlignment: CrossAxisAlignment.start,
     children: [
       Row(children: [
-        _FeatureChip('Teacher Clash', AppTheme.accentViolet),
+        _FeatureChip('Teacher Clash', AppTheme.accentBlue),
         const SizedBox(width: 8),
         _FeatureChip('Room Clash', AppTheme.accentCyan),
         const SizedBox(width: 8),

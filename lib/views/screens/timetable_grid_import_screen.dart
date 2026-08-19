@@ -515,7 +515,7 @@ class _TimetableGridImportScreenState extends State<TimetableGridImportScreen> {
                   Container(
                     width: 42, height: 42,
                     decoration: BoxDecoration(
-                      gradient: const LinearGradient(colors: [Color(0xFF6366F1), Color(0xFF4F46E5)]),
+                      gradient: AppTheme.blueGradient,
                       borderRadius: BorderRadius.circular(12),
                     ),
                     child: const Icon(Icons.upload_file_rounded, color: Colors.white, size: 22),
@@ -587,13 +587,13 @@ class _TimetableGridImportScreenState extends State<TimetableGridImportScreen> {
             color: isDark ? const Color(0xFF1E293B) : const Color(0xFFF1F5F9),
             borderRadius: BorderRadius.circular(16),
             border: Border.all(
-              color: const Color(0xFF6366F1).withValues(alpha: .4),
+              color: AppTheme.accentBlue.withValues(alpha: .4),
               width: 2,
               style: BorderStyle.solid,
             ),
           ),
           child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
-            Icon(Icons.upload_file_rounded, size: 48, color: const Color(0xFF6366F1).withValues(alpha: .7)),
+            Icon(Icons.upload_file_rounded, size: 48, color: AppTheme.accentBlue.withValues(alpha: .7)),
             const SizedBox(height: 16),
             Text('Click to pick an Excel timetable file',
                 style: GoogleFonts.plusJakartaSans(fontSize: 15, fontWeight: FontWeight.w700,
@@ -647,11 +647,11 @@ class _TimetableGridImportScreenState extends State<TimetableGridImportScreen> {
       // Summary cards
       Wrap(spacing: 12, runSpacing: 12, children: [
         _SummaryCard(label: 'Teachers',    value: '${r.teacherNames.length}', icon: Icons.person_rounded,           color: AppTheme.accentCyan),
-        _SummaryCard(label: 'Subjects',    value: '${r.subjectNames.length}', icon: Icons.menu_book_rounded,         color: AppTheme.accentViolet),
+        _SummaryCard(label: 'Subjects',    value: '${r.subjectNames.length}', icon: Icons.menu_book_rounded,         color: AppTheme.accentBlue),
         _SummaryCard(label: 'Classes',     value: '${r.classes.length}',      icon: Icons.school_rounded,            color: const Color(0xFFF97316)),
         _SummaryCard(label: 'Rooms',       value: '${r.roomNumbers.length}',  icon: Icons.meeting_room_rounded,      color: AppTheme.accentAmber),
         _SummaryCard(label: 'Periods',     value: '${r.periods.length}',      icon: Icons.schedule_rounded,          color: AppTheme.accentTeal),
-        _SummaryCard(label: 'Assignments', value: '${r.assignments.length}',  icon: Icons.assignment_rounded,        color: const Color(0xFF8B5CF6)),
+        _SummaryCard(label: 'Assignments', value: '${r.assignments.length}',  icon: Icons.assignment_rounded,        color: AppTheme.accentBlue),
       ]),
 
       const SizedBox(height: 20),
@@ -663,22 +663,22 @@ class _TimetableGridImportScreenState extends State<TimetableGridImportScreen> {
         child: Container(
           padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
           decoration: BoxDecoration(
-            color: (_effectiveIsIntermediate ? AppTheme.accentTeal : const Color(0xFF8B5CF6)).withValues(alpha: .12),
+            color: (_effectiveIsIntermediate ? AppTheme.accentTeal : AppTheme.accentBlue).withValues(alpha: .12),
             borderRadius: BorderRadius.circular(20),
-            border: Border.all(color: (_effectiveIsIntermediate ? AppTheme.accentTeal : const Color(0xFF8B5CF6)).withValues(alpha: .4)),
+            border: Border.all(color: (_effectiveIsIntermediate ? AppTheme.accentTeal : AppTheme.accentBlue).withValues(alpha: .4)),
           ),
           child: Row(mainAxisSize: MainAxisSize.min, children: [
             Icon(Icons.label_rounded,
-                size: 16, color: _effectiveIsIntermediate ? AppTheme.accentTeal : const Color(0xFF8B5CF6)),
+                size: 16, color: _effectiveIsIntermediate ? AppTheme.accentTeal : AppTheme.accentBlue),
             const SizedBox(width: 8),
             Text(
                 '${_levelOverride != null ? "Level" : "Level detected"}: '
                 '${_effectiveIsIntermediate ? "Intermediate" : "Bachelors"}',
                 style: GoogleFonts.plusJakartaSans(fontSize: 13, fontWeight: FontWeight.w700,
-                    color: _effectiveIsIntermediate ? AppTheme.accentTeal : const Color(0xFF8B5CF6))),
+                    color: _effectiveIsIntermediate ? AppTheme.accentTeal : AppTheme.accentBlue)),
             const SizedBox(width: 6),
             Icon(Icons.edit_rounded, size: 13,
-                color: (_effectiveIsIntermediate ? AppTheme.accentTeal : const Color(0xFF8B5CF6)).withValues(alpha: .7)),
+                color: (_effectiveIsIntermediate ? AppTheme.accentTeal : AppTheme.accentBlue).withValues(alpha: .7)),
           ]),
         ),
       ),
@@ -747,7 +747,7 @@ class _TimetableGridImportScreenState extends State<TimetableGridImportScreen> {
         Expanded(flex: 2, child: FilledButton(
           onPressed: _applyImport,
           style: FilledButton.styleFrom(
-            backgroundColor: const Color(0xFF6366F1),
+            backgroundColor: AppTheme.accentBlue,
             padding: const EdgeInsets.symmetric(vertical: 14),
             shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
           ),
@@ -774,11 +774,11 @@ class _TimetableGridImportScreenState extends State<TimetableGridImportScreen> {
         builder: (_, v, __) => Stack(alignment: Alignment.center, children: [
           SizedBox(width: 120, height: 120,
               child: CircularProgressIndicator(value: v, strokeWidth: 8,
-                  color: const Color(0xFF6366F1),
-                  backgroundColor: const Color(0xFF6366F1).withValues(alpha: .15))),
+                  color: AppTheme.accentBlue,
+                  backgroundColor: AppTheme.accentBlue.withValues(alpha: .15))),
           Text('${(v * 100).round()}%',
               style: GoogleFonts.plusJakartaSans(fontSize: 22, fontWeight: FontWeight.w800,
-                  color: const Color(0xFF6366F1))),
+                  color: AppTheme.accentBlue)),
         ]),
       ),
       const SizedBox(height: 24),
@@ -819,7 +819,7 @@ class _TimetableGridImportScreenState extends State<TimetableGridImportScreen> {
         icon: const Icon(Icons.grid_view_rounded),
         label: Text('View Schedule Matrix', style: GoogleFonts.plusJakartaSans(fontWeight: FontWeight.w800)),
         style: FilledButton.styleFrom(
-          backgroundColor: const Color(0xFF6366F1),
+          backgroundColor: AppTheme.accentBlue,
           padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 14),
           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
         ),
@@ -828,7 +828,7 @@ class _TimetableGridImportScreenState extends State<TimetableGridImportScreen> {
       TextButton(
         onPressed: () => setState(() { _step = 0; _result = null; }),
         child: Text('Import Another File', style: GoogleFonts.plusJakartaSans(
-            fontWeight: FontWeight.w700, color: const Color(0xFF6366F1))),
+            fontWeight: FontWeight.w700, color: AppTheme.accentBlue)),
       ),
     ]);
   }
@@ -857,8 +857,8 @@ class _StepIndicator extends StatelessWidget {
       if (i.isOdd) {
         return Expanded(child: Container(height: 2,
             color: (i ~/ 2) < current
-                ? const Color(0xFF6366F1)
-                : const Color(0xFF6366F1).withValues(alpha: .2)));
+                ? AppTheme.accentBlue
+                : AppTheme.accentBlue.withValues(alpha: .2)));
       }
       final idx  = i ~/ 2;
       final done = idx < current;
@@ -869,18 +869,18 @@ class _StepIndicator extends StatelessWidget {
           width: 28, height: 28,
           decoration: BoxDecoration(
             shape: BoxShape.circle,
-            color: done || active ? const Color(0xFF6366F1) : const Color(0xFF6366F1).withValues(alpha: .15),
+            color: done || active ? AppTheme.accentBlue : AppTheme.accentBlue.withValues(alpha: .15),
           ),
           child: Center(child: done
               ? const Icon(Icons.check_rounded, color: Colors.white, size: 16)
               : Text('${idx + 1}',
                   style: GoogleFonts.plusJakartaSans(fontSize: 12, fontWeight: FontWeight.w800,
-                      color: active ? Colors.white : const Color(0xFF6366F1).withValues(alpha: .5)))),
+                      color: active ? Colors.white : AppTheme.accentBlue.withValues(alpha: .5)))),
         ),
         const SizedBox(height: 4),
         Text(_labels[idx],
             style: GoogleFonts.plusJakartaSans(fontSize: 10, fontWeight: FontWeight.w600,
-                color: active ? const Color(0xFF6366F1) : Colors.grey)),
+                color: active ? AppTheme.accentBlue : Colors.grey)),
       ]);
     }));
   }
@@ -953,7 +953,7 @@ class _ToggleRow extends StatelessWidget {
         Text(subtitle, style: GoogleFonts.plusJakartaSans(fontSize: 11,
             color: isDark ? AppTheme.textSecondary : AppTheme.lightTextSec)),
       ])),
-      Switch(value: value, onChanged: onChanged, activeThumbColor: const Color(0xFF6366F1)),
+      Switch(value: value, onChanged: onChanged, activeThumbColor: AppTheme.accentBlue),
     ]);
   }
 }

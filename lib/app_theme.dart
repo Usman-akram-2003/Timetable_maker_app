@@ -13,7 +13,7 @@ class AppTheme {
 
   static const Color accentCyan    = Color(0xFF06B6D4);
   static const Color accentTeal    = Color(0xFF14B8A6);
-  static const Color accentViolet  = Color(0xFF8B5CF6);
+  static const Color accentBlue    = Color(0xFF2563EB);
   static const Color accentAmber   = Color(0xFFF59E0B);
 
   static const Color textPrimary   = Color(0xFFF1F5F9);   // near-white
@@ -52,14 +52,14 @@ class AppTheme {
     end: Alignment.bottomRight,
   );
 
-  static const LinearGradient violetGradient = LinearGradient(
-    colors: [Color(0xFF8B5CF6), Color(0xFF6D28D9)],
+  static const LinearGradient blueGradient = LinearGradient(
+    colors: [Color(0xFF3B82F6), Color(0xFF1D4ED8)],
     begin: Alignment.topLeft,
     end: Alignment.bottomRight,
   );
 
   static const LinearGradient heroGradient = LinearGradient(
-    colors: [Color(0xFF0891B2), Color(0xFF6D28D9)],
+    colors: [Color(0xFF0891B2), Color(0xFF1D4ED8)],
     begin: Alignment.topLeft,
     end: Alignment.bottomRight,
   );
@@ -142,7 +142,7 @@ class AppTheme {
       colorScheme: ColorScheme.dark(
         primary:   accentCyan,
         secondary: accentTeal,
-        tertiary:  accentViolet,
+        tertiary:  accentBlue,
         surface:   bgCard,
         onSurface: textPrimary,
         outline:   divider,
@@ -177,7 +177,7 @@ class AppTheme {
       colorScheme: ColorScheme.light(
         primary:   accentCyan,
         secondary: accentTeal,
-        tertiary:  accentViolet,
+        tertiary:  accentBlue,
         surface:   lightBgCard,
         onSurface: lightText,
         outline:   lightDivider,

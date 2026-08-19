@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:lucide_icons_flutter/lucide_icons.dart';
 import 'dart:async';
 import '../../viewmodels/data_entry_viewmodel.dart';
 import '../../viewmodels/allocator_viewmodel.dart';
@@ -22,9 +23,12 @@ import 'timetable_grid_import_screen.dart';
 extension _Th on BuildContext {
   bool get _dark => Theme.of(this).brightness == Brightness.dark;
 
-  BoxDecoration glowCard(Color c, {double radius = 18}) => _dark
-      ? AppTheme.glowCard(c, radius: radius)
-      : AppTheme.glowCardLight(c, radius: radius);
+  // Flat card everywhere — a neutral border + plain shadow reads calmer
+  // than a colored glow around every "Add X" panel, and matches the
+  // Dashboard redesign's card language. The accent color argument is kept
+  // (call sites still pass one) so nothing else has to change, it's just
+  // no longer used to tint the shadow.
+  BoxDecoration glowCard(Color c, {double radius = 18}) => solidCard(radius: radius);
 
   BoxDecoration solidCard({double radius = 12}) => _dark
       ? AppTheme.solidCard(radius: radius)
@@ -64,14 +68,14 @@ class _DataEntryScreenState extends State<DataEntryScreen>
   void dispose() { _tab.dispose(); super.dispose(); }
 
   static const _tabs = [
-    (Icons.person_rounded,       'Teachers'),
-    (Icons.menu_book_rounded,    'Courses'),
-    (Icons.school_rounded,       'Classes'),
-    (Icons.meeting_room_rounded, 'Rooms'),
-    (Icons.schedule_rounded,     'Time Slots'),
+    (LucideIcons.presentation,  'Teachers'),
+    (LucideIcons.bookOpen,      'Courses'),
+    (LucideIcons.graduationCap, 'Classes'),
+    (LucideIcons.doorOpen,      'Rooms'),
+    (LucideIcons.clock,         'Time Slots'),
   ];
   static const _colors = [
-    AppTheme.accentCyan, AppTheme.accentViolet,
+    AppTheme.accentCyan, AppTheme.accentBlue,
     Color(0xFFF97316), AppTheme.accentAmber, AppTheme.accentTeal,
   ];
 
@@ -119,7 +123,7 @@ class _DataEntryScreenState extends State<DataEntryScreen>
         decoration: BoxDecoration(gradient: AppTheme.cyanGradient,
           borderRadius: BorderRadius.circular(14),
           boxShadow: [BoxShadow(color: AppTheme.accentCyan.withValues(alpha: .35), blurRadius: 18, offset: const Offset(0,5))]),
-        child: const Icon(Icons.storage_rounded, color: Colors.white, size: 24)),
+        child: const Icon(LucideIcons.database, color: Colors.white, size: 22)),
       const SizedBox(width: 16),
       Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
         Text('Manage Data', style: GoogleFonts.plusJakartaSans(
@@ -131,9 +135,7 @@ class _DataEntryScreenState extends State<DataEntryScreen>
                 color: isDark ? AppTheme.textSecondary : AppTheme.lightTextSec)),
       ])),
       const SizedBox(width: 12),
-      _ImportBtn(),
-      const SizedBox(width: 8),
-      _ImportTimetableBtn(),
+      _ImportMenuBtn(),
     ]),
   );
 
@@ -219,7 +221,7 @@ class _TeachersTabState extends State<_TeachersTab> {
         decoration: context.glowCard(_col, radius: 18),
         child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
           _bar('Add Department', _col, isDark), const SizedBox(height: 14),
-          _Field(ctrl: _dept, label: 'Department Name', icon: Icons.apartment_rounded, color: _col,
+          _Field(ctrl: _dept, label: 'Department Name', icon: LucideIcons.building2, color: _col,
               hint: 'Computer Science, Mathematics…',
               textInputAction: TextInputAction.done, onSubmitted: (_) => _submitDept()),
           const SizedBox(height: 16),
@@ -236,12 +238,16 @@ class _TeachersTabState extends State<_TeachersTab> {
               hint: 'Prof. Ali, Dr. Sarah…',
               formatters: [FilteringTextInputFormatter.allow(RegExp(r'[A-Za-z .]'))]),
           const SizedBox(height: 12),
+          Text('Department', style: GoogleFonts.plusJakartaSans(
+              fontSize: 11.5, fontWeight: FontWeight.w700,
+              color: isDark ? AppTheme.textSecondary : AppTheme.lightTextSec)),
+          const SizedBox(height: 7),
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
             decoration: BoxDecoration(
-              color: isDark ? AppTheme.bgMid : const Color(0xFFF1F5F9),
+              color: isDark ? AppTheme.bgMid : Colors.white,
               borderRadius: BorderRadius.circular(12),
-              border: Border.all(color: isDark ? AppTheme.divider : AppTheme.lightDivider)
+              border: Border.all(color: isDark ? AppTheme.divider : const Color(0xFFE2E8F0))
             ),
             child: DropdownButtonHideUnderline(
               child: DropdownButton<String>(
@@ -367,7 +373,7 @@ class _DeptCard extends StatelessWidget {
               decoration: BoxDecoration(color: _col.withValues(alpha: .12),
                   borderRadius: BorderRadius.circular(10),
                   border: Border.all(color: _col.withValues(alpha: .3))),
-              child: const Center(child: Icon(Icons.apartment_rounded, color: _col, size: 18))),
+              child: const Center(child: Icon(LucideIcons.building2, color: _col, size: 18))),
             const SizedBox(width: 12),
             Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
               Text(dept, style: GoogleFonts.plusJakartaSans(
@@ -430,18 +436,19 @@ class _CoursesTabState extends State<_CoursesTab> with SingleTickerProviderState
       margin: const EdgeInsets.only(bottom: 16),
       padding: const EdgeInsets.all(3),
       decoration: BoxDecoration(
-        color: isDark ? AppTheme.bgMid : const Color(0xFFF1F5F9),
+        color: isDark ? AppTheme.bgMid : Colors.white,
         borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: isDark ? AppTheme.divider : const Color(0xFFE2E8F0)),
       ),
       child: TabBar(
         controller: _tabCtrl,
         indicator: BoxDecoration(
           gradient: LinearGradient(colors: [
-            AppTheme.accentViolet,
-            AppTheme.accentViolet.withValues(alpha: .8),
+            AppTheme.accentBlue,
+            AppTheme.accentBlue.withValues(alpha: .8),
           ]),
           borderRadius: BorderRadius.circular(11),
-          boxShadow: [BoxShadow(color: AppTheme.accentViolet.withValues(alpha: .3), blurRadius: 8, offset: const Offset(0, 2))],
+          boxShadow: [BoxShadow(color: AppTheme.accentBlue.withValues(alpha: .3), blurRadius: 8, offset: const Offset(0, 2))],
         ),
         indicatorSize: TabBarIndicatorSize.tab,
         dividerColor: Colors.transparent,
@@ -533,7 +540,7 @@ class _CourseFormState extends State<_CourseForm> {
   @override
   Widget build(BuildContext context) {
     final isDark = context._dark;
-    final accentColor = _isInter ? AppTheme.accentTeal : AppTheme.accentViolet;
+    final accentColor = _isInter ? AppTheme.accentTeal : AppTheme.accentBlue;
     final query = _query;
     final filteredCourses = query.isEmpty
         ? widget.courses
@@ -552,7 +559,7 @@ class _CourseFormState extends State<_CourseForm> {
             border: Border.all(color: accentColor.withValues(alpha: .35)),
           ),
           child: Row(mainAxisSize: MainAxisSize.min, children: [
-            Icon(_isInter ? Icons.school_rounded : Icons.account_balance_rounded,
+            Icon(_isInter ? LucideIcons.school : LucideIcons.landmark,
                 size: 12, color: accentColor),
             const SizedBox(width: 5),
             Text(_isInter ? 'Intermediate' : "Bachelor's",
@@ -721,7 +728,7 @@ class _ClassesTabState extends State<_ClassesTab> {
         decoration: context.glowCard(_col, radius: 18),
         child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
           _bar('Add Program', _col, isDark), const SizedBox(height: 14),
-          _Field(ctrl: _prog, label: 'Program Name', icon: Icons.account_balance_rounded, color: _col,
+          _Field(ctrl: _prog, label: 'Program Name', icon: LucideIcons.folder, color: _col,
               hint: 'BS Computer Science, 1st Year Science…',
               formatters: [FilteringTextInputFormatter.allow(RegExp(r'[A-Za-z -]'))],
               textInputAction: TextInputAction.done, onSubmitted: (_) => _submitProg()),
@@ -821,7 +828,7 @@ class _ProgCardState extends State<_ProgCard> {
               decoration: BoxDecoration(color: _col.withValues(alpha: .12),
                   borderRadius: BorderRadius.circular(10),
                   border: Border.all(color: _col.withValues(alpha: .3))),
-              child: const Center(child: Icon(Icons.folder_rounded, color: _col, size: 18))),
+              child: const Center(child: Icon(LucideIcons.folder, color: _col, size: 18))),
             const SizedBox(width: 12),
             Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
               Text(widget.prog.name, style: GoogleFonts.plusJakartaSans(
@@ -940,7 +947,7 @@ class _RoomsTabState extends State<_RoomsTab> {
 
     return _Shell(color: AppTheme.accentAmber,
       formContent: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        _Field(ctrl: _n,   label: 'Room / Hall Name',       icon: Icons.meeting_room_rounded,   color: AppTheme.accentAmber, hint: '41, 102, 305…',
+        _Field(ctrl: _n,   label: 'Room / Hall Name',       icon: LucideIcons.doorOpen,   color: AppTheme.accentAmber, hint: '41, 102, 305…',
             formatters: [FilteringTextInputFormatter.allow(RegExp(r'[0-9]'))]),
         const SizedBox(height: 12),
         _Field(ctrl: _cap, label: 'Capacity (optional)',    icon: Icons.people_outline_rounded,  color: AppTheme.accentAmber, hint: '40', kt: TextInputType.number,
@@ -952,7 +959,7 @@ class _RoomsTabState extends State<_RoomsTab> {
         const SizedBox(height: 10),
         _PillSelector(
           labels: ['Room  ($roomCount)', 'Hall  ($hallCount)', 'Other  ($otherCount)'],
-          icons:  const [Icons.meeting_room_rounded, Icons.holiday_village_rounded, Icons.category_rounded],
+          icons:  const [LucideIcons.doorOpen, LucideIcons.building, LucideIcons.shapes],
           selected: _type == RoomType.room ? 0 : _type == RoomType.hall ? 1 : 2,
           color: AppTheme.accentAmber,
           isDark: isDark,
@@ -1220,8 +1227,9 @@ class _PillSelector extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.all(3),
       decoration: BoxDecoration(
-        color: isDark ? AppTheme.bgMid : const Color(0xFFF1F5F9),
+        color: isDark ? AppTheme.bgMid : Colors.white,
         borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: isDark ? AppTheme.divider : const Color(0xFFE2E8F0)),
       ),
       child: Row(
         children: List.generate(labels.length, (i) {
@@ -1372,27 +1380,40 @@ class _Field extends StatelessWidget {
   @override
   Widget build(BuildContext ctx) {
     final isDark  = ctx._dark;
-    final fillCol = isDark ? AppTheme.bgMid : const Color(0xFFF8FAFC);
-    final bdCol   = isDark ? AppTheme.divider : AppTheme.lightDivider;
+    final fillCol = isDark ? AppTheme.bgMid : Colors.white;
+    final bdCol   = isDark ? AppTheme.divider : const Color(0xFFE2E8F0);
     final txtCol  = isDark ? AppTheme.textPrimary : AppTheme.lightText;
-    final lblCol  = isDark ? AppTheme.textMuted : AppTheme.lightTextMut;
-    return TextField(
-      controller: ctrl,
-      keyboardType: kt ?? TextInputType.text,
-      inputFormatters: formatters,
-      textInputAction: textInputAction ?? TextInputAction.next,
-      onSubmitted: onSubmitted,
-      style: GoogleFonts.plusJakartaSans(fontSize: 14, color: txtCol),
-      decoration: InputDecoration(
-        labelText: label, hintText: hint,
-        labelStyle: GoogleFonts.plusJakartaSans(color: lblCol, fontSize: 12),
-        hintStyle:  GoogleFonts.plusJakartaSans(color: lblCol.withValues(alpha: .6), fontSize: 13),
-        prefixIcon: Icon(icon, color: lblCol, size: 18),
-        filled: true, fillColor: fillCol,
-        border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide(color: bdCol)),
-        enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide(color: bdCol)),
-        focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide(color: color, width: 1.5)),
-        contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16)));
+    final lblCol  = isDark ? AppTheme.textSecondary : AppTheme.lightTextSec;
+    // Label sits above the field (not floating inside it) — matches the
+    // small bold section labels used everywhere else on this screen,
+    // and reads less like a bare generic form input.
+    return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+      Text(label, style: GoogleFonts.plusJakartaSans(
+          fontSize: 11.5, fontWeight: FontWeight.w700, color: lblCol)),
+      const SizedBox(height: 7),
+      TextField(
+        controller: ctrl,
+        keyboardType: kt ?? TextInputType.text,
+        inputFormatters: formatters,
+        textInputAction: textInputAction ?? TextInputAction.next,
+        onSubmitted: onSubmitted,
+        style: GoogleFonts.plusJakartaSans(fontSize: 14, color: txtCol),
+        decoration: InputDecoration(
+          hintText: hint,
+          hintStyle: GoogleFonts.plusJakartaSans(color: lblCol.withValues(alpha: .5), fontSize: 13),
+          prefixIconConstraints: const BoxConstraints.tightFor(width: 46, height: 28),
+          prefixIcon: Padding(padding: const EdgeInsets.only(left: 10),
+              child: Container(width: 26, height: 26,
+                  decoration: BoxDecoration(color: color.withValues(alpha: .12),
+                      borderRadius: BorderRadius.circular(8)),
+                  child: Icon(icon, color: color, size: 13))),
+          filled: true, fillColor: fillCol,
+          border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide(color: bdCol)),
+          enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide(color: bdCol)),
+          focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide(color: color, width: 1.5)),
+          contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 14)),
+      ),
+    ]);
   }
 }
 
@@ -1406,8 +1427,8 @@ class _SearchBar extends StatelessWidget {
   @override
   Widget build(BuildContext ctx) {
     final isDark  = ctx._dark;
-    final fillCol = isDark ? AppTheme.bgMid : const Color(0xFFF8FAFC);
-    final bdCol   = isDark ? AppTheme.divider : AppTheme.lightDivider;
+    final fillCol = isDark ? AppTheme.bgMid : Colors.white;
+    final bdCol   = isDark ? AppTheme.divider : const Color(0xFFE2E8F0);
     final txtCol  = isDark ? AppTheme.textPrimary : AppTheme.lightText;
     final lblCol  = isDark ? AppTheme.textMuted : AppTheme.lightTextMut;
     return TextField(
@@ -1417,7 +1438,7 @@ class _SearchBar extends StatelessWidget {
       decoration: InputDecoration(
         hintText: hint,
         hintStyle: GoogleFonts.plusJakartaSans(color: lblCol.withValues(alpha: .7), fontSize: 13),
-        prefixIcon: Icon(Icons.search_rounded, color: lblCol, size: 20),
+        prefixIcon: Icon(LucideIcons.search, color: lblCol, size: 18),
         suffixIcon: ctrl.text.isEmpty ? null : IconButton(
           icon: Icon(Icons.close_rounded, color: lblCol, size: 18),
           onPressed: () { ctrl.clear(); onChanged(''); },
@@ -1489,8 +1510,8 @@ class _TF extends StatelessWidget {
   @override
   Widget build(BuildContext ctx) {
     final isDark  = ctx._dark;
-    final fillCol = isDark ? AppTheme.bgMid : const Color(0xFFF8FAFC);
-    final bdCol   = error ? AppTheme.error : (isDark ? AppTheme.divider : AppTheme.lightDivider);
+    final fillCol = isDark ? AppTheme.bgMid : Colors.white;
+    final bdCol   = error ? AppTheme.error : (isDark ? AppTheme.divider : const Color(0xFFE2E8F0));
     final txtCol  = isDark ? AppTheme.textPrimary : AppTheme.lightText;
     final lblCol  = isDark ? AppTheme.textMuted : AppTheme.lightTextMut;
     return TextField(
@@ -1511,72 +1532,78 @@ class _TF extends StatelessWidget {
   }
 }
 
-// ── EXCEL IMPORT BUTTON ────────────────────────────────────────────────────────
-class _ImportBtn extends StatelessWidget {
-  @override
-  Widget build(BuildContext context) {
-    final isDark = context._dark;
-    const col = AppTheme.accentTeal;
-    return GestureDetector(
-      onTap: () => showDialog(context: context, barrierDismissible: false,
-          builder: (_) => _ImportDialog()),
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-        decoration: BoxDecoration(
-          color: col.withValues(alpha: isDark ? .15 : .10),
-          borderRadius: BorderRadius.circular(12),
-          border: Border.all(color: col.withValues(alpha: .4), width: 1.2),
-        ),
-        child: Row(mainAxisSize: MainAxisSize.min, children: [
-          const Icon(Icons.upload_file_rounded, size: 18, color: col),
-          const SizedBox(width: 8),
-          Text('Import Excel', style: GoogleFonts.plusJakartaSans(
-              fontSize: 12, fontWeight: FontWeight.w700, color: col)),
-        ]),
-      ),
-    );
-  }
-}
+// ── IMPORT MENU BUTTON ────────────────────────────────────────────────────────
+// One button embedding both import paths — Excel (raw data) and Timetable
+// (grid import) — as a dropdown, instead of two separate buttons competing
+// for header space.
+class _ImportMenuBtn extends StatelessWidget {
+  static const _col = AppTheme.accentBlue;
 
-// ── IMPORT TIMETABLE BUTTON ───────────────────────────────────────────────────
-class _ImportTimetableBtn extends StatelessWidget {
-  @override
-  Widget build(BuildContext context) {
-    final isDark = context._dark;
-    const col = Color(0xFF6366F1); // indigo
-    return GestureDetector(
-      onTap: () => showDialog(
-        context: context,
-        barrierDismissible: false,
-        builder: (_) => Dialog(
-          backgroundColor: isDark ? const Color(0xFF0F172A) : Colors.white,
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-          insetPadding: const EdgeInsets.symmetric(horizontal: 24, vertical: 40),
-          child: SizedBox(
-            width: 720,
-            height: 600,
-            child: TimetableGridImportScreen(
-              onImportComplete: () => Navigator.of(context).pop(),
-            ),
+  void _openExcel(BuildContext context) => showDialog(
+      context: context, barrierDismissible: false, builder: (_) => _ImportDialog());
+
+  void _openTimetable(BuildContext context) => showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (dialogCtx) => Dialog(
+        backgroundColor: context._dark ? const Color(0xFF0F172A) : Colors.white,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        insetPadding: const EdgeInsets.symmetric(horizontal: 24, vertical: 40),
+        child: SizedBox(
+          width: 720,
+          height: 600,
+          child: TimetableGridImportScreen(
+            onImportComplete: () => Navigator.of(dialogCtx).pop(),
           ),
         ),
-      ),
+      ));
+
+  @override
+  Widget build(BuildContext context) {
+    final isDark = context._dark;
+    return PopupMenuButton<int>(
+      offset: const Offset(0, 46),
+      color: isDark ? AppTheme.bgCard : Colors.white,
+      elevation: 8,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14),
+          side: BorderSide(color: isDark ? AppTheme.divider : const Color(0xFFE6E9F0))),
+      onSelected: (v) => v == 0 ? _openExcel(context) : _openTimetable(context),
+      itemBuilder: (_) => [
+        _menuItem(0, LucideIcons.upload, AppTheme.accentTeal, 'Import Excel', 'Raw teacher/course/room data', isDark),
+        _menuItem(1, LucideIcons.table, _col, 'Import Timetable', 'A full timetable grid from a sheet', isDark),
+      ],
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
         decoration: BoxDecoration(
-          color: col.withValues(alpha: isDark ? .15 : .10),
+          color: _col.withValues(alpha: isDark ? .15 : .10),
           borderRadius: BorderRadius.circular(12),
-          border: Border.all(color: col.withValues(alpha: .4), width: 1.2),
+          border: Border.all(color: _col.withValues(alpha: .4), width: 1.2),
         ),
         child: Row(mainAxisSize: MainAxisSize.min, children: [
-          const Icon(Icons.table_chart_rounded, size: 18, color: col),
+          const Icon(LucideIcons.upload, size: 18, color: _col),
           const SizedBox(width: 8),
-          Text('Import Timetable', style: GoogleFonts.plusJakartaSans(
-              fontSize: 12, fontWeight: FontWeight.w700, color: col)),
+          Text('Import', style: GoogleFonts.plusJakartaSans(
+              fontSize: 12, fontWeight: FontWeight.w700, color: _col)),
+          const SizedBox(width: 4),
+          const Icon(LucideIcons.chevronDown, size: 16, color: _col),
         ]),
       ),
     );
   }
+
+  PopupMenuItem<int> _menuItem(int value, IconData icon, Color col, String title, String subtitle, bool isDark) =>
+      PopupMenuItem<int>(value: value, child: Row(children: [
+        Container(width: 32, height: 32,
+            decoration: BoxDecoration(color: col.withValues(alpha: .12), borderRadius: BorderRadius.circular(9)),
+            child: Icon(icon, size: 16, color: col)),
+        const SizedBox(width: 12),
+        Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Text(title, style: GoogleFonts.plusJakartaSans(fontSize: 13, fontWeight: FontWeight.w700,
+              color: isDark ? AppTheme.textPrimary : AppTheme.lightText)),
+          Text(subtitle, style: GoogleFonts.plusJakartaSans(fontSize: 10.5,
+              color: isDark ? AppTheme.textSecondary : AppTheme.lightTextSec)),
+        ]),
+      ]));
 }
 
 // ── IMPORT DIALOG ─────────────────────────────────────────────────────────────
@@ -1699,7 +1726,7 @@ class _ImportDialogState extends State<_ImportDialog> {
       Row(children: [
         Container(width: 40, height: 40,
           decoration: BoxDecoration(color: _col.withValues(alpha: .15), borderRadius: BorderRadius.circular(11)),
-          child: const Icon(Icons.upload_file_rounded, color: _col, size: 22)),
+          child: const Icon(LucideIcons.upload, color: _col, size: 22)),
         const SizedBox(width: 14),
         Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
           Text('Import from Excel', style: GoogleFonts.plusJakartaSans(fontSize: 16, fontWeight: FontWeight.w800,
@@ -1709,11 +1736,11 @@ class _ImportDialogState extends State<_ImportDialog> {
         ]),
       ]),
       const SizedBox(height: 20),
-      _optTile(Icons.apartment_rounded, 'Departments', _optDept, (v) => setState(() => _optDept = v!), isDark),
+      _optTile(LucideIcons.building2, 'Departments', _optDept, (v) => setState(() => _optDept = v!), isDark),
       _optTile(Icons.person_outline_rounded, 'Teachers / Lecturers', _optTeach, (v) => setState(() => _optTeach = v!), isDark),
       _optTile(Icons.menu_book_rounded, 'Courses', _optCourse, (v) => setState(() => _optCourse = v!), isDark),
       _optTile(Icons.school_rounded, 'Programs & Classes', _optClass, (v) => setState(() => _optClass = v!), isDark),
-      _optTile(Icons.meeting_room_rounded, 'Rooms', _optRoom, (v) => setState(() => _optRoom = v!), isDark),
+      _optTile(LucideIcons.doorOpen, 'Rooms', _optRoom, (v) => setState(() => _optRoom = v!), isDark),
       const SizedBox(height: 20),
       Row(children: [
         Expanded(child: GestureDetector(onTap: () => Navigator.of(context).pop(),
@@ -1809,11 +1836,11 @@ class _ImportDialogState extends State<_ImportDialog> {
               color: isDark ? AppTheme.textPrimary : AppTheme.lightText)),
         ]),
         const SizedBox(height: 20),
-        _doneRow(Icons.apartment_rounded, r.departments, 'departments', AppTheme.accentCyan, isDark),
+        _doneRow(LucideIcons.building2, r.departments, 'departments', AppTheme.accentCyan, isDark),
         _doneRow(Icons.person_outline_rounded, r.teachers, 'teachers', _col, isDark),
-        _doneRow(Icons.menu_book_rounded, r.courses, 'courses', AppTheme.accentViolet, isDark),
+        _doneRow(Icons.menu_book_rounded, r.courses, 'courses', AppTheme.accentBlue, isDark),
         _doneRow(Icons.school_rounded, r.classes, 'classes', AppTheme.accentTeal, isDark),
-        _doneRow(Icons.meeting_room_rounded, r.rooms, 'rooms', Colors.orange, isDark),
+        _doneRow(LucideIcons.doorOpen, r.rooms, 'rooms', Colors.orange, isDark),
         const SizedBox(height: 20),
         SizedBox(width: double.infinity, child: GestureDetector(
           onTap: () => Navigator.of(context).pop(),
