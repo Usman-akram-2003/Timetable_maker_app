@@ -17,7 +17,7 @@ import '../models/education_level.dart';
 import '../models/elective_group.dart';
 import '../models/combined_rule.dart';
 enum ExportFormat { csv, excel }
-enum ExportType { studentWise, teacherWise }
+enum ExportType { studentWise, teacherWise, roomWise }
 
 class AllocatorViewModel extends ChangeNotifier {
   bool _isGenerating = false;
@@ -626,6 +626,12 @@ class AllocatorViewModel extends ChangeNotifier {
   //   Col 2+ : Period I, II, III …
   //   Each cell: CourseName\nCourseCode\nClassCode\n(Cr-N)\nCr\nR.room
   // =========================================================================
+  static const _typeNames = {
+    ExportType.studentWise: 'StudentWise',
+    ExportType.teacherWise: 'TeacherWise',
+    ExportType.roomWise:    'RoomWise',
+  };
+
   Future<String> exportSchedule({
     required ExportFormat   format,
     required ExportType     type,
@@ -633,32 +639,19 @@ class AllocatorViewModel extends ChangeNotifier {
     List<Room>              rooms = const [],
     List<ClassModel>        classes = const [],
     List<ElectiveGroup>     electiveGroups = const [],
+    int                     workingDays = 6,
   }) async {
-    if (_allAssignments.isEmpty) throw Exception('No schedule to export.');
-
-    final sortedSlots = List<TimeSlot>.from(timeSlots)
-      ..sort((a, b) => a.period.compareTo(b.period));
-
-    const romans = ['I','II','III','IV','V','VI','VII','VIII','IX','X'];
-
     final timestamp = DateTime.now().millisecondsSinceEpoch;
-    final typeName  = type == ExportType.studentWise ? 'StudentWise' : 'TeacherWise';
+    final typeName  = _typeNames[type]!;
+    final ext       = format == ExportFormat.csv ? 'csv' : 'xlsx';
+    final fileName  = 'Timetable_${typeName}_$timestamp';
 
-    final ext      = format == ExportFormat.csv ? 'csv' : 'xlsx';
-    final fileName = 'Timetable_${typeName}_$timestamp';
-    
-    Uint8List bytes;
+    final bytes = buildScheduleBytes(
+      format: format, type: type, timeSlots: timeSlots,
+      rooms: rooms, classes: classes, electiveGroups: electiveGroups,
+      workingDays: workingDays,
+    );
 
-    if (format == ExportFormat.csv) {
-      final rows    = _buildCsvMatrix(type, sortedSlots, romans);
-      final csvData = const ListToCsvConverter().convert(rows);
-      bytes = Uint8List.fromList(utf8.encode(csvData));
-    } else {
-      final fileBytes = _buildExcel(type, sortedSlots, romans, typeName, rooms, classes, electiveGroups);
-      if (fileBytes == null) throw Exception('Excel build failed.');
-      bytes = Uint8List.fromList(fileBytes);
-    }
-    
     final savedPath = await FileSaver.instance.saveFile(
       name: fileName,
       bytes: bytes,
@@ -667,6 +660,36 @@ class AllocatorViewModel extends ChangeNotifier {
     );
 
     return savedPath; // caller shows this in a SnackBar
+  }
+
+  /// The actual file-building step, split out from [exportSchedule] so it
+  /// can be exercised directly (e.g. round-tripped through the grid
+  /// importer) without going through the platform file-save dialog.
+  Uint8List buildScheduleBytes({
+    required ExportFormat   format,
+    required ExportType     type,
+    required List<TimeSlot> timeSlots,
+    List<Room>              rooms = const [],
+    List<ClassModel>        classes = const [],
+    List<ElectiveGroup>     electiveGroups = const [],
+    int                     workingDays = 6,
+  }) {
+    if (_allAssignments.isEmpty) throw Exception('No schedule to export.');
+
+    final sortedSlots = List<TimeSlot>.from(timeSlots)
+      ..sort((a, b) => a.period.compareTo(b.period));
+
+    const romans = ['I','II','III','IV','V','VI','VII','VIII','IX','X'];
+    final typeName = _typeNames[type]!;
+
+    if (format == ExportFormat.csv) {
+      final rows    = _buildCsvMatrix(type, sortedSlots, romans, rooms, workingDays);
+      final csvData = const ListToCsvConverter().convert(rows);
+      return Uint8List.fromList(utf8.encode(csvData));
+    }
+    final fileBytes = _buildExcel(type, sortedSlots, romans, typeName, rooms, classes, electiveGroups, workingDays);
+    if (fileBytes == null) throw Exception('Excel build failed.');
+    return Uint8List.fromList(fileBytes);
   }
 
   // ── Helpers: parse shortCode back into program + class ───────────────────
@@ -693,18 +716,66 @@ class AllocatorViewModel extends ChangeNotifier {
     return '(${slots.first}-${slots.last})';
   }
 
-  // ── STUDENT-WISE cell text ────────────────────────────────────────────────
-  /// Format for ONE assignment inside a period cell (student-wise):
-  ///   "Teacher Name (1-3)"
-  ///   "Course Full Name  COURSE-CODE"
-  String _studentCellEntry(Assignment a) {
-    return '${a.teacher.name} ${_dayRange(a)}\n${a.course.name}  ${a.course.code}';
+  // ── Grid-import-compatible cell text ──────────────────────────────────────
+  // TimetableGridImportService's regular-cell parser (_parseCell) reads
+  // exactly two lines — teacher, then subject — and pulls a trailing 2-3
+  // digit token off either line as the room number; anything past line 2 is
+  // ignored, not an error. Matching that shape here (for the one axis the
+  // importer actually understands — class rows) means a re-import of a
+  // Class-wise export round-trips real assignments back in, not just text.
+  //
+  // Known gap, inherited from the importer itself: its day-range annotation
+  // ("(1-3)") is only recognised for a small fixed set of "combined" subjects
+  // (Islamiat, Pakistan Studies, Physical Education, Punjabi, Ethics…), the
+  // ones GGC's real sheets actually split that way — an arbitrary partial-
+  // week course (e.g. "Math" taught Mon-Wed only) has no representable form
+  // in the importer's grammar at all. Rather than fake a format the importer
+  // can't read back, a partial-week entry here still exports the full
+  // teacher/subject/room on lines 1-2 (so re-import doesn't drop it, just
+  // widens it back to the full week) and adds the real day range as a third,
+  // human-readable line the parser simply never looks at.
+
+  /// True for the plain numeric room names (`"12"`, `"51"`) the importer's
+  /// trailing-token regex can recognise — non-numeric rooms (`"Hall A"`)
+  /// still print, just won't be pulled out as a structured room on re-import.
+  static bool _isGridRoomToken(String name) => RegExp(r'^\d{2,3}$').hasMatch(name.trim());
+
+  String _roomSuffix(String roomName) =>
+      _isGridRoomToken(roomName) ? '  $roomName' : (roomName.isEmpty ? '' : ' ($roomName)');
+
+  /// Class-wise (row = class): "Teacher\nSubject  Room[\n(days)]".
+  String _classWiseCellText(Assignment a, String roomName, int workingDays) {
+    final lines = [a.teacher.name, '${a.course.name}${_roomSuffix(roomName)}'];
+    if (a.occupiedSlots.length < workingDays) lines.add(_dayRange(a));
+    return lines.join('\n');
   }
 
-  // ── TEACHER-WISE cell text ────────────────────────────────────────────────
-  String _cellTextTeacher(Assignment a) {
-    final room = (a.roomId != null && a.roomId!.isNotEmpty) ? 'R.${a.roomId}' : 'R.';
-    return '${a.course.name}\n${a.course.code}\n${a.classModel.shortCode}\n(Cr-${a.duration})\nCr\n$room';
+  /// Teacher-wise (row = teacher): "Subject\nClass  Room[\n(days)]".
+  String _teacherWiseCellText(Assignment a, String roomName, int workingDays) {
+    final lines = [a.course.name, '${a.classModel.shortCode}${_roomSuffix(roomName)}'];
+    if (a.occupiedSlots.length < workingDays) lines.add(_dayRange(a));
+    return lines.join('\n');
+  }
+
+  /// Room-wise (row = room): "Class\nSubject - Teacher[\n(days)]".
+  String _roomWiseCellText(Assignment a, int workingDays) {
+    final lines = [a.classModel.shortCode, '${a.course.name} - ${a.teacher.name}'];
+    if (a.occupiedSlots.length < workingDays) lines.add(_dayRange(a));
+    return lines.join('\n');
+  }
+
+  /// Groups every room-assigned entry in [_allAssignments] by room name —
+  /// the room-wise counterpart of _scheduleByClass/_scheduleByTeacher,
+  /// built on demand at export time since it's the only place that needs it.
+  Map<String, List<Assignment>> _scheduleByRoom(Map<String, String> roomIdToName) {
+    final map = <String, List<Assignment>>{};
+    for (final a in _allAssignments) {
+      if (!a.hasRoom) continue;
+      final name = roomIdToName[a.roomId];
+      if (name == null || name.isEmpty) continue;
+      map.putIfAbsent(name, () => []).add(a);
+    }
+    return map;
   }
 
   // ── CSV matrix ────────────────────────────────────────────────────────────
@@ -712,8 +783,11 @@ class AllocatorViewModel extends ChangeNotifier {
     ExportType     type,
     List<TimeSlot> sortedSlots,
     List<String>   romans,
+    List<Room>     rooms,
+    int            workingDays,
   ) {
     final rows = <List<String>>[];
+    final roomIdToName = { for (final r in rooms) r.id: r.name };
 
     if (type == ExportType.studentWise) {
       rows.add(['STUDENT / CLASS WISE TIMETABLE']);
@@ -750,25 +824,13 @@ class AllocatorViewModel extends ChangeNotifier {
             ..sort((a, b) => (a.occupiedSlots.firstOrNull ?? 0)
                 .compareTo(b.occupiedSlots.firstOrNull ?? 0));
 
-          if (inSlot.isEmpty) {
-            dataRow.add('');
-          } else {
-            // Group by first-day block: days 1-3 vs 4-6
-            final group1 = inSlot.where((a) =>
-                (a.occupiedSlots.firstOrNull ?? 0) <= 3).toList();
-            final group2 = inSlot.where((a) =>
-                (a.occupiedSlots.firstOrNull ?? 0) > 3).toList();
-
-            final parts = <String>[];
-            for (final a in group1) { parts.add(_studentCellEntry(a)); }
-            for (final a in group2) { parts.add(_studentCellEntry(a)); }
-            dataRow.add(parts.join('\n\n'));
-          }
+          dataRow.add(inSlot.isEmpty ? '' : inSlot
+              .map((a) => _classWiseCellText(a, roomIdToName[a.roomId] ?? '', workingDays))
+              .join('\n\n'));
         }
         rows.add(dataRow);
       }
-    } else {
-      // ── Teacher-Wise ──────────────────────────────────────────────────
+    } else if (type == ExportType.teacherWise) {
       rows.add(['DEPARTMENT & TEACHER WISE TIMETABLE']);
 
       final header = <String>['TEACHER NAME', 'DEPARTMENT'];
@@ -795,9 +857,43 @@ class AllocatorViewModel extends ChangeNotifier {
 
         for (final ts in sortedSlots) {
           final inSlot = asgnList.where((a) => a.timeSlotId == ts.id).toList();
-          dataRow.add(inSlot.isEmpty
-              ? ''
-              : inSlot.map(_cellTextTeacher).join('\n---\n'));
+          dataRow.add(inSlot.isEmpty ? '' : inSlot
+              .map((a) => _teacherWiseCellText(a, roomIdToName[a.roomId] ?? '', workingDays))
+              .join('\n---\n'));
+        }
+        rows.add(dataRow);
+      }
+    } else {
+      // ── Room-Wise ────────────────────────────────────────────────────
+      rows.add(['ROOM WISE TIMETABLE']);
+
+      final header = <String>['ROOM'];
+      for (int i = 0; i < sortedSlots.length; i++) {
+        header.add(i < romans.length ? romans[i] : 'P${i + 1}');
+      }
+      rows.add(header);
+
+      final timeRow = <String>['Daily Time'];
+      for (final ts in sortedSlots) {
+        timeRow.add('${ts.startTime}-${ts.endTime}');
+      }
+      rows.add(timeRow);
+
+      final byRoom = _scheduleByRoom(roomIdToName);
+      final validSlotIds = sortedSlots.map((ts) => ts.id).toSet();
+      final roomKeys = byRoom.keys.where((k) =>
+          byRoom[k]!.any((a) => validSlotIds.contains(a.timeSlotId))
+      ).toList()..sort();
+
+      for (final rName in roomKeys) {
+        final asgnList = byRoom[rName]!;
+        final dataRow  = <String>[rName];
+
+        for (final ts in sortedSlots) {
+          final inSlot = asgnList.where((a) => a.timeSlotId == ts.id).toList();
+          dataRow.add(inSlot.isEmpty ? '' : inSlot
+              .map((a) => _roomWiseCellText(a, workingDays))
+              .join('\n---\n'));
         }
         rows.add(dataRow);
       }
@@ -815,9 +911,9 @@ class AllocatorViewModel extends ChangeNotifier {
     List<Room>          rooms,
     List<ClassModel>    classes,
     List<ElectiveGroup> electiveGroups,
+    int                 workingDays,
   ) {
     final excelDoc = Excel.createExcel();
-    final isTeacher = (type == ExportType.teacherWise);
     final roomIdToName = { for (final r in rooms) r.id: r.name };
 
     final Border thinBorder = Border(
@@ -888,7 +984,7 @@ class AllocatorViewModel extends ChangeNotifier {
       bottomBorder: thinBorder,
     );
 
-    if (!isTeacher) {
+    if (type == ExportType.studentWise) {
       for (final level in EducationLevel.values) {
         final levelSlots = allSlots.where((ts) => ts.level == level).toList();
         final classKeys = _scheduleByClass.keys.where((k) {
@@ -975,13 +1071,14 @@ class AllocatorViewModel extends ChangeNotifier {
               } else {
                 final inSlot = asgnList.where((a) => a.timeSlotId == ts.id).toList()
                   ..sort((a, b) => (a.occupiedSlots.firstOrNull ?? 0).compareTo(b.occupiedSlots.firstOrNull ?? 0));
-                
-                final cellText = inSlot.map((a) {
-                  final rName = a.roomId != null && a.roomId != mainRoom ? (roomIdToName[a.roomId] ?? '') : '';
-                  // Only show day range if it's split
-                  final dRange = inSlot.length > 1 ? _dayRange(a) : '';
-                  return '${a.teacher.name} ${a.course.name} $dRange $rName}'.replaceAll(RegExp(r'\s+'), ' ').trim();
-                }).join('\n');
+
+                // Genuine "Teacher\nSubject  Room" pairs, blank-line separated
+                // when more than one — the exact shape
+                // TimetableGridImportService._splitCellEntries/_parseCell
+                // reads back, so a re-import round-trips real assignments.
+                final cellText = inSlot
+                    .map((a) => _classWiseCellText(a, roomIdToName[a.roomId] ?? '', workingDays))
+                    .join('\n\n');
                 dataRow.add(TextCellValue(cellText));
               }
             }
@@ -1014,7 +1111,7 @@ class AllocatorViewModel extends ChangeNotifier {
         excelDoc.delete('Sheet1');
       }
       
-    } else {
+    } else if (type == ExportType.teacherWise) {
       excelDoc.rename('Sheet1', sheetName);
       final sheet = excelDoc[sheetName];
       final totalCols = 2 + allSlots.length;
@@ -1068,10 +1165,9 @@ class AllocatorViewModel extends ChangeNotifier {
           } else {
              final inSlot = asgnList.where((a) => a.timeSlotId == ts.id).toList();
              dataRow.add(TextCellValue(
-               inSlot.isEmpty ? ' ' : inSlot.map((a) {
-                 final rName = a.roomId != null ? (roomIdToName[a.roomId] ?? '') : '';
-                 return '${a.course.name}\n${a.classModel.shortCode}\n$rName';
-               }).join('\n---\n')
+               inSlot.isEmpty ? ' ' : inSlot
+                   .map((a) => _teacherWiseCellText(a, roomIdToName[a.roomId] ?? '', workingDays))
+                   .join('\n---\n')
              ));
           }
         }
@@ -1086,6 +1182,60 @@ class AllocatorViewModel extends ChangeNotifier {
       sheet.setColumnWidth(0, 22.0);
       sheet.setColumnWidth(1, 14.0);
       for (int i = 2; i < totalCols; i++) {
+        sheet.setColumnWidth(i, 24.0);
+      }
+    } else {
+      // ── Room-Wise ────────────────────────────────────────────────────
+      excelDoc.rename('Sheet1', sheetName);
+      final sheet = excelDoc[sheetName];
+      final totalCols = 1 + allSlots.length;
+
+      final titleText = 'ROOM WISE TIMETABLE';
+      sheet.appendRow(List.generate(totalCols, (i) => TextCellValue(i == 0 ? titleText : ' ')));
+      sheet.merge(
+        CellIndex.indexByColumnRow(columnIndex: 0, rowIndex: 0),
+        CellIndex.indexByColumnRow(columnIndex: totalCols - 1, rowIndex: 0),
+      );
+      sheet.cell(CellIndex.indexByColumnRow(columnIndex: 0, rowIndex: 0)).cellStyle = titleStyle;
+      sheet.setRowHeight(0, 60.0);
+
+      final headerRow = <CellValue>[TextCellValue('ROOM')];
+      for (int i = 0; i < allSlots.length; i++) {
+        final periodName = i < romans.length ? romans[i] : 'P${i + 1}';
+        headerRow.add(TextCellValue('$periodName\n(${allSlots[i].startTime} - ${allSlots[i].endTime})'));
+      }
+      sheet.appendRow(headerRow);
+      for (int c = 0; c < headerRow.length; c++) {
+        sheet.cell(CellIndex.indexByColumnRow(columnIndex: c, rowIndex: 1)).cellStyle =
+            c < 1 ? labelHeaderStyle : periodHeaderStyle;
+      }
+      sheet.setRowHeight(1, 70.0);
+
+      final byRoom = _scheduleByRoom(roomIdToName);
+      final roomKeys = byRoom.keys.toList()..sort();
+      for (final rName in roomKeys) {
+        final excelRow = sheet.maxRows;
+        final asgnList = byRoom[rName]!;
+        final dataRow = <CellValue>[TextCellValue(rName)];
+
+        for (final ts in allSlots) {
+          final inSlot = asgnList.where((a) => a.timeSlotId == ts.id).toList();
+          dataRow.add(TextCellValue(
+            inSlot.isEmpty ? ' ' : inSlot
+                .map((a) => _roomWiseCellText(a, workingDays))
+                .join('\n---\n')
+          ));
+        }
+
+        sheet.appendRow(dataRow);
+        for (int c = 0; c < dataRow.length; c++) {
+          sheet.cell(CellIndex.indexByColumnRow(columnIndex: c, rowIndex: excelRow)).cellStyle = c == 0 ? dataStyleLeft : dataStyle;
+        }
+        sheet.setRowHeight(excelRow, 90.0);
+      }
+
+      sheet.setColumnWidth(0, 16.0);
+      for (int i = 1; i < totalCols; i++) {
         sheet.setColumnWidth(i, 24.0);
       }
     }

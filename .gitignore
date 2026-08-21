@@ -68,3 +68,7 @@ tool/batch_import/node/node_modules/
 tool/batch_import/**/*.json
 !tool/batch_import/node/package.json
 !tool/batch_import/node/package-lock.json
+
+# Installer build artifacts (large binaries) — keep the .iss script only
+installer/output/
+installer/vc_redist.x64.exe

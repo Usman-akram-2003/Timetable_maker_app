@@ -1,5 +1,6 @@
 import 'dart:math';
 import 'package:flutter/foundation.dart';
+import 'cancelable_ga_run.dart';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Input / Output types
@@ -76,6 +77,13 @@ class GaOutput {
 
 class GaEngine {
   static Future<GaOutput> run(GaInput input) => compute(_runGA, input);
+
+  /// Same computation, but cancellable — call the returned `cancel` to kill
+  /// the worker isolate mid-run instead of waiting for `result`.
+  static ({Future<GaOutput> result, void Function() cancel}) runCancelable(GaInput input) {
+    final r = CancelableGaRun();
+    return (result: r.run(_runGA, input), cancel: r.cancel);
+  }
 
   // Kept for API compatibility (no longer used internally).
   static List<List<int>> buildDayOptions(int workingDays) =>

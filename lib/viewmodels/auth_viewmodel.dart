@@ -25,6 +25,12 @@ class AuthViewModel extends ChangeNotifier {
         _status = AuthStatus.authenticated;
       }
       notifyListeners();
+    }, onError: (Object e) {
+      // e.g. no network reaching Firebase Auth — fall back to the login
+      // screen instead of leaving an unhandled stream error to crash the app.
+      _status = AuthStatus.unauthenticated;
+      _errorMessage = 'Connection error: $e';
+      notifyListeners();
     });
   }
 

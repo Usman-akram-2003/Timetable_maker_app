@@ -84,12 +84,16 @@ class _WorkloadScreenState extends State<WorkloadScreen> {
           final balanced = workloads.where((w) => w.status == _WorkloadStatus.balanced).length;
           final totalHours = workloads.fold<double>(0, (s, w) => s + w.assignedHours);
 
+          final showList = dataVm.teachers.isNotEmpty && filtered.isNotEmpty;
+
           return Center(
             child: ConstrainedBox(
               constraints: const BoxConstraints(maxWidth: 900),
-              child: ListView(
-                padding: EdgeInsets.fromLTRB(hp, 56, hp, 40),
-                children: [
+              child: CustomScrollView(slivers: [
+                SliverPadding(
+                  padding: EdgeInsets.fromLTRB(hp, 56, hp, showList ? 0 : 40),
+                  sliver: SliverToBoxAdapter(
+                    child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
                   // ── Header ─────────────────────────────────────────────
                   Row(
                     children: [
@@ -157,25 +161,36 @@ class _WorkloadScreenState extends State<WorkloadScreen> {
                   else if (filtered.isEmpty)
                     _emptyState(tp, ts, 'No results',
                         'Try adjusting your search or filter.')
-                  else ...[
+                  else
                     Text(
                       '${filtered.length} teacher${filtered.length > 1 ? 's' : ''}',
                       style: GoogleFonts.plusJakartaSans(
                           fontSize: 12, color: ts, fontWeight: FontWeight.w600),
                     ),
-                    const SizedBox(height: 10),
-                    ...filtered.map((w) => Padding(
-                          padding: const EdgeInsets.only(bottom: 10),
-                          child: _TeacherWorkloadCard(
-                            workload: w,
-                            isDark: isDark,
-                            tp: tp,
-                            ts: ts,
-                          ),
-                        )),
-                  ],
-                ],
-              ),
+                  if (showList) const SizedBox(height: 10),
+                    ]),
+                  ),
+                ),
+                // Lazily built — only the teacher cards actually on screen get
+                // built, instead of the whole (unbounded) filtered list every
+                // time the search box or sort/dept filter changes.
+                if (showList)
+                  SliverPadding(
+                    padding: EdgeInsets.fromLTRB(hp, 0, hp, 40),
+                    sliver: SliverList.builder(
+                      itemCount: filtered.length,
+                      itemBuilder: (context, i) => Padding(
+                        padding: const EdgeInsets.only(bottom: 10),
+                        child: _TeacherWorkloadCard(
+                          workload: filtered[i],
+                          isDark: isDark,
+                          tp: tp,
+                          ts: ts,
+                        ),
+                      ),
+                    ),
+                  ),
+              ]),
             ),
           );
         },

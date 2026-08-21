@@ -1,7 +1,10 @@
+import 'dart:async' show Timer;
+import 'dart:math' show pi, sin;
 import 'package:flutter/foundation.dart' show listEquals;
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:lucide_icons_flutter/lucide_icons.dart';
 import '../../viewmodels/data_entry_viewmodel.dart';
 import '../../viewmodels/allocator_viewmodel.dart';
 import '../../viewmodels/backend_viewmodel.dart';
@@ -107,7 +110,7 @@ class _AllocatorScreenState extends State<AllocatorScreen> {
     if (context.read<SettingsViewModel>().scheduleLocked) {
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(
           content: Row(children: [
-            const Icon(Icons.lock_rounded, color: Colors.white, size: 18),
+            const Icon(LucideIcons.lockKeyhole, color: Colors.white, size: 18),
             const SizedBox(width: 10),
             Expanded(child: Text('Schedule is locked. Unlock in settings to modify.',
                 style: GoogleFonts.plusJakartaSans(color: Colors.white, fontWeight: FontWeight.w600))),
@@ -202,100 +205,125 @@ class _AllocatorScreenState extends State<AllocatorScreen> {
 
               final hp    = ctx.hPad;
               final backVm = ctx.watch<BackendViewModel>();
+              final hasAssignments = dataVm.assignments.isNotEmpty;
+              // Computed once per rebuild — the list sliver below only builds
+              // the tiles actually on screen, but filtering itself is still
+              // O(n) over all assignments so it shouldn't run per-tile.
+              final filtered = hasAssignments ? _filteredAssignments(dataVm) : const <Assignment>[];
 
-              return ListView(
-                padding: EdgeInsets.fromLTRB(hp, 56, hp, 40),
-                children: [
-                  _header(isDark),
-                  const SizedBox(height: 16),
+              return CustomScrollView(
+                slivers: [
+                  SliverPadding(
+                    padding: EdgeInsets.fromLTRB(hp, 56, hp, hasAssignments ? 0 : 40),
+                    sliver: SliverToBoxAdapter(
+                      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                        _header(isDark),
+                        const SizedBox(height: 16),
 
-                  // ── Elective Groups (Inter) — shown at top, always visible ──
-                  _ElectiveGroupsSection(dataVm: dataVm),
+                        // ── Elective Groups (Inter) — shown at top, always visible ──
+                        _ElectiveGroupsSection(dataVm: dataVm),
 
-                  // ── Normal assignment form ────────────────────────────────
-                  const SizedBox(height: 20),
-                  _addAssignmentCard(ctx, dataVm, allocVm, periodClash),
+                        // ── Normal assignment form ────────────────────────────────
+                        const SizedBox(height: 20),
+                        _addAssignmentCard(ctx, dataVm, allocVm, periodClash),
 
-                  // ── Room Allocation — separate, manual-only ───────────────
-                  const SizedBox(height: 20),
-                  _roomAllocationCard(ctx, dataVm),
+                        // ── Room Allocation — separate, manual-only ───────────────
+                        const SizedBox(height: 20),
+                        _roomAllocationCard(ctx, dataVm),
 
-                  const SizedBox(height: 20),
+                        const SizedBox(height: 20),
 
-                  // ── Credit-hour violations banner ─────────────────────────
-                  if (allocVm.creditHourViolations.isNotEmpty) ...[
-                    _creditHourBanner(ctx, allocVm.creditHourViolations, dataVm, allocVm),
-                    const SizedBox(height: 16),
-                  ],
+                        // ── Credit-hour violations banner ─────────────────────────
+                        if (allocVm.creditHourViolations.isNotEmpty) ...[
+                          _creditHourBanner(ctx, allocVm.creditHourViolations, dataVm, allocVm),
+                          const SizedBox(height: 16),
+                        ],
 
-                  // ── Teacher overload banner (real-minute feasibility) ─────
-                  // 2 Bach slots == 3 Inter slots: teachers whose total weekly
-                  // teaching minutes exceed the timetable's physical capacity
-                  // can NEVER be scheduled clash-free — fix the data, not the GA.
-                  Builder(builder: (_) {
-                    final overloads = AllocatorViewModel.teacherOverloads(
-                        dataVm.combinedAssignments, dataVm.timeSlots);
-                    if (overloads.isEmpty) return const SizedBox.shrink();
-                    return Column(children: [
-                      Container(
-                        padding: const EdgeInsets.all(14),
-                        decoration: BoxDecoration(
-                          color: AppTheme.error.withValues(alpha: .08),
-                          borderRadius: BorderRadius.circular(14),
-                          border: Border.all(color: AppTheme.error.withValues(alpha: .35)),
-                        ),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Row(children: [
-                              const Icon(Icons.person_off_rounded, color: AppTheme.error, size: 16),
-                              const SizedBox(width: 8),
-                              Text('Over-booked Teachers (${overloads.length})',
-                                  style: GoogleFonts.plusJakartaSans(
-                                      fontWeight: FontWeight.w800, color: AppTheme.error, fontSize: 13)),
-                            ]),
-                            const SizedBox(height: 8),
-                            ...overloads.map((v) => Padding(
-                                padding: const EdgeInsets.only(top: 4),
-                                child: Text('⚠ $v', style: GoogleFonts.plusJakartaSans(
-                                    fontSize: 11, color: ctx._ts)))),
-                            const SizedBox(height: 6),
-                            Text('No algorithm can schedule these clash-free — remove or reassign some of their courses first.',
-                                style: GoogleFonts.plusJakartaSans(
-                                    fontSize: 10, fontStyle: FontStyle.italic, color: AppTheme.error)),
-                          ],
-                        ),
+                        // ── Teacher overload banner (real-minute feasibility) ─────
+                        // 2 Bach slots == 3 Inter slots: teachers whose total weekly
+                        // teaching minutes exceed the timetable's physical capacity
+                        // can NEVER be scheduled clash-free — fix the data, not the GA.
+                        Builder(builder: (_) {
+                          final overloads = AllocatorViewModel.teacherOverloads(
+                              dataVm.combinedAssignments, dataVm.timeSlots);
+                          if (overloads.isEmpty) return const SizedBox.shrink();
+                          return Column(children: [
+                            Container(
+                              padding: const EdgeInsets.all(14),
+                              decoration: BoxDecoration(
+                                color: AppTheme.error.withValues(alpha: .08),
+                                borderRadius: BorderRadius.circular(14),
+                                border: Border.all(color: AppTheme.error.withValues(alpha: .35)),
+                              ),
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Row(children: [
+                                    const Icon(Icons.person_off_rounded, color: AppTheme.error, size: 16),
+                                    const SizedBox(width: 8),
+                                    Text('Over-booked Teachers (${overloads.length})',
+                                        style: GoogleFonts.plusJakartaSans(
+                                            fontWeight: FontWeight.w800, color: AppTheme.error, fontSize: 13)),
+                                  ]),
+                                  const SizedBox(height: 8),
+                                  ...overloads.map((v) => Padding(
+                                      padding: const EdgeInsets.only(top: 4),
+                                      child: Text('⚠ $v', style: GoogleFonts.plusJakartaSans(
+                                          fontSize: 11, color: ctx._ts)))),
+                                  const SizedBox(height: 6),
+                                  Text('No algorithm can schedule these clash-free — remove or reassign some of their courses first.',
+                                      style: GoogleFonts.plusJakartaSans(
+                                          fontSize: 10, fontStyle: FontStyle.italic, color: AppTheme.error)),
+                                ],
+                              ),
+                            ),
+                            const SizedBox(height: 16),
+                          ]);
+                        }),
+
+                        // ── Error banner ──────────────────────────────────────────
+                        if (allocVm.lastError != null) ...[
+                          _errBanner(allocVm.lastError!),
+                          const SizedBox(height: 16),
+                        ],
+
+                        // ── GA / Auto-generate panel ──────────────────────────────
+                        if (hasAssignments || dataVm.electiveGroups.isNotEmpty) ...[
+                          _GaPanel(dataVm: dataVm, vm: backVm,
+                              onNavigateToSchedule: widget.onNavigateToSchedule),
+                          const SizedBox(height: 20),
+                        ],
+
+                        // ── Assignment list header ────────────────────────────────
+                        if (hasAssignments) ...[
+                          _listHeader(ctx, dataVm, allocVm),
+                          const SizedBox(height: 12),
+                        ],
+                      ]),
+                    ),
+                  ),
+
+                  // ── Assignment list — lazily built via SliverList so only the
+                  // tiles actually on screen are constructed, not all of them on
+                  // every rebuild (this list runs into the hundreds in real use).
+                  if (hasAssignments)
+                    SliverPadding(
+                      padding: EdgeInsets.fromLTRB(hp, 0, hp, 40),
+                      sliver: SliverList.builder(
+                        itemCount: filtered.length,
+                        itemBuilder: (context, i) {
+                          final a = filtered[i];
+                          return Padding(
+                            padding: const EdgeInsets.only(bottom: 10),
+                            child: _AssignmentTile(
+                                index: i + 1, assignment: a,
+                                timeSlots: dataVm.timeSlots, rooms: dataVm.rooms,
+                                onDelete: () { if (!_checkLock()) dataVm.removeAssignment(a.id); },
+                                onEdit: () { if (!_checkLock()) _populateFormForEdit(a, dataVm); }),
+                          );
+                        },
                       ),
-                      const SizedBox(height: 16),
-                    ]);
-                  }),
-
-                  // ── Error banner ──────────────────────────────────────────
-                  if (allocVm.lastError != null) ...[
-                    _errBanner(allocVm.lastError!),
-                    const SizedBox(height: 16),
-                  ],
-
-                  // ── GA / Auto-generate panel ──────────────────────────────
-                  if (dataVm.assignments.isNotEmpty || dataVm.electiveGroups.isNotEmpty) ...[
-                    _GaPanel(dataVm: dataVm, vm: backVm,
-                        onNavigateToSchedule: widget.onNavigateToSchedule),
-                    const SizedBox(height: 20),
-                  ],
-
-                  // ── Assignment list ───────────────────────────────────────
-                  if (dataVm.assignments.isNotEmpty) ...[
-                    _listHeader(ctx, dataVm, allocVm),
-                    const SizedBox(height: 12),
-                    ..._filteredAssignments(dataVm)
-                        .asMap().entries.map((e) => Padding(
-                        padding: const EdgeInsets.only(bottom: 10),
-                        child: _AssignmentTile(
-                            index: e.key + 1, assignment: e.value,
-                            timeSlots: dataVm.timeSlots, rooms: dataVm.rooms,
-                            onDelete: () { if (!_checkLock()) dataVm.removeAssignment(e.value.id); },
-                            onEdit: () { if (!_checkLock()) _populateFormForEdit(e.value, dataVm); }))),
-                  ],
+                    ),
                 ],
               );
             },
@@ -320,7 +348,7 @@ class _AllocatorScreenState extends State<AllocatorScreen> {
           border: Border.all(color: bdCol),
         ),
         child: Column(children: [
-          const Icon(Icons.info_outline_rounded, color: AppTheme.accentBlue, size: 36),
+          const Icon(LucideIcons.info, color: AppTheme.accentBlue, size: 36),
           const SizedBox(height: 12),
           Text('Set up your data first',
               style: GoogleFonts.plusJakartaSans(
@@ -356,7 +384,7 @@ class _AllocatorScreenState extends State<AllocatorScreen> {
                 decoration: BoxDecoration(
                     gradient: AppTheme.blueGradient,
                     borderRadius: BorderRadius.circular(9)),
-                child: const Icon(Icons.add_rounded, color: Colors.white, size: 18)),
+                child: const Icon(LucideIcons.plus, color: Colors.white, size: 18)),
             const SizedBox(width: 12),
             Text('Add Assignment',
                 style: GoogleFonts.plusJakartaSans(
@@ -383,7 +411,7 @@ class _AllocatorScreenState extends State<AllocatorScreen> {
                   border: Border.all(color: bdCol),
                 ),
                 child: Row(children: [
-                  Icon(Icons.tune_rounded, size: 16,
+                  Icon(LucideIcons.settings2, size: 16,
                       color: _showAdvanced ? AppTheme.accentBlue : ctx._tm),
                   const SizedBox(width: 8),
                   Expanded(child: Text(
@@ -394,8 +422,8 @@ class _AllocatorScreenState extends State<AllocatorScreen> {
                         color: _showAdvanced ? AppTheme.accentBlue : ctx._ts),
                   )),
                   Icon(_showAdvanced
-                      ? Icons.keyboard_arrow_up_rounded
-                      : Icons.keyboard_arrow_down_rounded,
+                      ? LucideIcons.chevronUp
+                      : LucideIcons.chevronDown,
                       size: 18, color: ctx._tm),
                 ]),
               ),
@@ -404,11 +432,11 @@ class _AllocatorScreenState extends State<AllocatorScreen> {
             // ── Advanced section (expandable) ──────────────────────────────
             if (_showAdvanced) ...[
               const SizedBox(height: 16),
-              _sectionLabel(ctx, 'Days', Icons.calendar_today_rounded, AppTheme.accentCyan),
+              _sectionLabel(ctx, 'Days', LucideIcons.calendar, AppTheme.accentCyan),
               const SizedBox(height: 10),
               _step2Days(ctx, dataVm, allocVm),
               const SizedBox(height: 16),
-              _sectionLabel(ctx, 'Time Period', Icons.schedule_rounded, AppTheme.accentBlue),
+              _sectionLabel(ctx, 'Time Period', LucideIcons.clock, AppTheme.accentBlue),
               const SizedBox(height: 10),
               _step2Period(ctx, dataVm, periodClash),
             ],
@@ -418,7 +446,7 @@ class _AllocatorScreenState extends State<AllocatorScreen> {
             // ── Editing banner + Cancel ──────────────────────────────────────
             if (_editBackup != null) ...[
               Row(children: [
-                Icon(Icons.edit_outlined, size: 15, color: AppTheme.accentCyan),
+                Icon(LucideIcons.pencil, size: 15, color: AppTheme.accentCyan),
                 const SizedBox(width: 6),
                 Expanded(child: Text('Editing an existing assignment',
                     style: GoogleFonts.plusJakartaSans(fontSize: 12,
@@ -463,7 +491,7 @@ class _AllocatorScreenState extends State<AllocatorScreen> {
             borderRadius: BorderRadius.circular(14),
             boxShadow: [BoxShadow(color: AppTheme.accentBlue.withValues(alpha: .4),
                 blurRadius: 18, offset: const Offset(0,5))]),
-        child: const Icon(Icons.account_tree_rounded, color: Colors.white, size: 24)),
+        child: const Icon(LucideIcons.calendarClock, color: Colors.white, size: 24)),
     const SizedBox(width: 16),
     Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
       Text('Smart Allocator', style: GoogleFonts.plusJakartaSans(
@@ -477,12 +505,12 @@ class _AllocatorScreenState extends State<AllocatorScreen> {
 
   Widget _step1(BuildContext ctx, DataEntryViewModel dataVm) {
     if (dataVm.classes.isEmpty || dataVm.courses.isEmpty || dataVm.teachers.isEmpty) {
-      return _InfoBox(icon: Icons.info_outline_rounded, color: AppTheme.accentBlue,
+      return _InfoBox(icon: LucideIcons.info, color: AppTheme.accentBlue,
           text: 'Add classes, courses and teachers in Manage Data first.');
     }
     return Column(children: [
       _Drop<ClassModel>(key: ValueKey('class-${_class?.id}'),
-          label: 'Class / Section', icon: Icons.school_rounded,
+          label: 'Class / Section', icon: LucideIcons.graduationCap,
           value: _class, color: AppTheme.accentBlue,
           items: { for (final c in dataVm.classes) c.id: c }.values.toList(),
           itemLabel: (c) => c.shortCode,
@@ -501,13 +529,13 @@ class _AllocatorScreenState extends State<AllocatorScreen> {
             ? dataVm.courses
             : dataVm.courses.where((c) => c.level == _class!.level).toList();
         final cDrop = _Drop<Course>(key: ValueKey('course-${_course?.id}'),
-            label: 'Course', icon: Icons.menu_book_outlined,
+            label: 'Course', icon: LucideIcons.bookOpen,
             value: _course, color: AppTheme.accentBlue,
             items: { for (final c in coursesForClass) c.id: c }.values.toList(),
             itemLabel: (c) => '${c.name}  (${c.code})',
             onChanged: (v) => setState(() => _course = v));
         final tDrop = _Drop<Teacher>(key: ValueKey('teacher-${_teacher?.id}'),
-            label: 'Teacher', icon: Icons.person_outline_rounded,
+            label: 'Teacher', icon: LucideIcons.user,
             value: _teacher, color: AppTheme.accentBlue,
             items: { for (final t in dataVm.teachers) t.id: t }.values.toList(),
             itemLabel: (t) => t.name,
@@ -532,7 +560,7 @@ class _AllocatorScreenState extends State<AllocatorScreen> {
       const SizedBox(height: 16),
       if (_autoDays) ...[
         if (!_step1Done)
-          _InfoBox(icon: Icons.info_outline_rounded, color: AppTheme.accentCyan,
+          _InfoBox(icon: LucideIcons.info, color: AppTheme.accentCyan,
               text: 'Complete Step 1 to preview the AI-selected days.')
         else
           _autoDaysPreview(ctx, dataVm, allocVm),
@@ -652,13 +680,13 @@ class _AllocatorScreenState extends State<AllocatorScreen> {
       const SizedBox(height: 16),
       if (_autoPeriod) ...[
         if (!_step1Done)
-          _InfoBox(icon: Icons.info_outline_rounded, color: AppTheme.accentCyan,
+          _InfoBox(icon: LucideIcons.info, color: AppTheme.accentCyan,
               text: 'Complete Step 1 to preview the AI-selected period.')
         else
           _autoPeriodPreview(dataVm),
       ] else ...[
         if (dataVm.timeSlots.isEmpty)
-          _InfoBox(icon: Icons.info_outline_rounded, color: AppTheme.accentBlue,
+          _InfoBox(icon: LucideIcons.info, color: AppTheme.accentBlue,
               text: 'No time slots yet. Add them in Manage Data and Time Slots.')
         else ...[
           Text('Select a time period', style: GoogleFonts.plusJakartaSans(
@@ -674,7 +702,7 @@ class _AllocatorScreenState extends State<AllocatorScreen> {
           ),
           if (clash != null) ...[
             const SizedBox(height: 12),
-            _InfoBox(icon: Icons.error_outline_rounded, color: AppTheme.error, text: clash),
+            _InfoBox(icon: LucideIcons.circleAlert, color: AppTheme.error, text: clash),
           ],
         ],
       ],
@@ -813,7 +841,7 @@ class _AllocatorScreenState extends State<AllocatorScreen> {
   Widget _autoDaysPreview(BuildContext ctx, DataEntryViewModel dataVm, AllocatorViewModel allocVm) {
     final result = _autoFindResult(dataVm);
     if (result == null) {
-      return _InfoBox(icon: Icons.warning_amber_rounded, color: AppTheme.accentAmber,
+      return _InfoBox(icon: LucideIcons.triangleAlert, color: AppTheme.accentAmber,
           text: 'No free days found for ${_teacher!.name}. Remove an assignment first.');
     }
     final start = result.first;
@@ -824,7 +852,7 @@ class _AllocatorScreenState extends State<AllocatorScreen> {
         _Chip('${dur}d block', AppTheme.accentCyan, Icons.view_column_rounded),
         const SizedBox(width: 8),
         _Chip('${_dayShort[start-1]}-${_dayShort[start+dur-2]}',
-            AppTheme.accentCyan, Icons.calendar_today_rounded),
+            AppTheme.accentCyan, LucideIcons.calendar),
       ]),
       const SizedBox(height: 12),
       _DayGrid(
@@ -835,7 +863,7 @@ class _AllocatorScreenState extends State<AllocatorScreen> {
           readOnly: true,
           onToggle: null),
       const SizedBox(height: 10),
-      _InfoBox(icon: Icons.auto_awesome_rounded, color: AppTheme.accentCyan,
+      _InfoBox(icon: LucideIcons.sparkles, color: AppTheme.accentCyan,
           text: 'Consecutive days preferred (e.g. Mon-Wed, Thu-Sat).'),
     ]);
   }
@@ -860,13 +888,13 @@ class _AllocatorScreenState extends State<AllocatorScreen> {
   Widget _autoPeriodPreview(DataEntryViewModel dataVm) {
     final freePeriod = _autoPeriodSlot(dataVm);
     if (freePeriod == null) {
-      return _InfoBox(icon: Icons.warning_amber_rounded, color: AppTheme.accentAmber,
+      return _InfoBox(icon: LucideIcons.triangleAlert, color: AppTheme.accentAmber,
           text: 'No time slots configured. Add slots in Manage Data and Time Slots.');
     }
     return Row(children: [
-      _Chip('Auto-selected', AppTheme.accentCyan, Icons.auto_awesome_rounded),
+      _Chip('Auto-selected', AppTheme.accentCyan, LucideIcons.sparkles),
       const SizedBox(width: 8),
-      _Chip(freePeriod.label, AppTheme.accentBlue, Icons.schedule_rounded),
+      _Chip(freePeriod.label, AppTheme.accentBlue, LucideIcons.clock),
     ]);
   }
 
@@ -990,7 +1018,7 @@ class _AllocatorScreenState extends State<AllocatorScreen> {
                       gradient: const LinearGradient(
                           colors: [AppTheme.accentAmber, Color(0xFFF97316)]),
                       borderRadius: BorderRadius.circular(9)),
-                  child: const Icon(Icons.meeting_room_rounded, color: Colors.white, size: 18)),
+                  child: const Icon(LucideIcons.doorOpen, color: Colors.white, size: 18)),
               const SizedBox(width: 12),
               Expanded(child: Text('Room Allocation',
                   style: GoogleFonts.plusJakartaSans(
@@ -999,7 +1027,7 @@ class _AllocatorScreenState extends State<AllocatorScreen> {
                   style: GoogleFonts.plusJakartaSans(
                       fontSize: 11, fontWeight: FontWeight.w700, color: ctx._ts)),
               const SizedBox(width: 8),
-              Icon(_roomAllocExpanded ? Icons.expand_less_rounded : Icons.expand_more_rounded,
+              Icon(_roomAllocExpanded ? LucideIcons.chevronUp : LucideIcons.chevronDown,
                   color: AppTheme.accentAmber, size: 22),
             ]),
           ),
@@ -1026,7 +1054,7 @@ class _AllocatorScreenState extends State<AllocatorScreen> {
                       color: AppTheme.accentAmber.withValues(alpha: .35)),
                 ),
                 child: Row(children: [
-                  const Icon(Icons.link_off_rounded,
+                  const Icon(LucideIcons.link2Off,
                       color: AppTheme.accentAmber, size: 18),
                   const SizedBox(width: 10),
                   Expanded(
@@ -1059,7 +1087,7 @@ class _AllocatorScreenState extends State<AllocatorScreen> {
                   border: Border.all(color: AppTheme.error.withValues(alpha: .35)),
                 ),
                 child: Row(children: [
-                  Icon(Icons.warning_rounded, color: AppTheme.error, size: 18),
+                  Icon(LucideIcons.triangleAlert, color: AppTheme.error, size: 18),
                   const SizedBox(width: 10),
                   Expanded(child: Text(
                       '${clashingIds.length} room clash${clashingIds.length > 1 ? 'es' : ''} — '
@@ -1080,7 +1108,7 @@ class _AllocatorScreenState extends State<AllocatorScreen> {
                 decoration: InputDecoration(
                   hintText: 'Search course, teacher, class or room…',
                   hintStyle: GoogleFonts.plusJakartaSans(fontSize: 12, color: ctx._tm),
-                  prefixIcon: Icon(Icons.search_rounded, size: 18, color: ctx._tm),
+                  prefixIcon: Icon(LucideIcons.search, size: 18, color: ctx._tm),
                   isDense: true,
                   filled: true, fillColor: isDark ? AppTheme.bgMid : const Color(0xFFF8FAFC),
                   contentPadding: const EdgeInsets.symmetric(vertical: 12),
@@ -1111,10 +1139,10 @@ class _AllocatorScreenState extends State<AllocatorScreen> {
             const SizedBox(height: 14),
 
             if (dataVm.rooms.isEmpty)
-              _InfoBox(icon: Icons.warning_amber_rounded, color: AppTheme.accentAmber,
+              _InfoBox(icon: LucideIcons.triangleAlert, color: AppTheme.accentAmber,
                   text: 'No rooms added. Go to Manage Data and Rooms first.')
             else if (list.isEmpty)
-              _InfoBox(icon: Icons.info_outline_rounded, color: AppTheme.accentCyan,
+              _InfoBox(icon: LucideIcons.info, color: AppTheme.accentCyan,
                   text: 'No assignments match.')
             else
               ConstrainedBox(
@@ -1190,10 +1218,10 @@ class _AllocatorScreenState extends State<AllocatorScreen> {
               _Chip(clash ? '${room?.name} occupied' : (room?.name ?? 'No room'),
                   clash ? AppTheme.error
                       : room != null ? AppTheme.accentTeal : AppTheme.accentAmber,
-                  clash ? Icons.error_rounded
-                      : room != null ? Icons.meeting_room_rounded : Icons.warning_amber_rounded),
+                  clash ? LucideIcons.circleAlert
+                      : room != null ? LucideIcons.doorOpen : LucideIcons.triangleAlert),
               const SizedBox(width: 6),
-              Icon(expanded ? Icons.keyboard_arrow_up_rounded : Icons.keyboard_arrow_down_rounded,
+              Icon(expanded ? LucideIcons.chevronUp : LucideIcons.chevronDown,
                   size: 16, color: ctx._tm),
             ]),
           ),
@@ -1263,7 +1291,7 @@ class _AllocatorScreenState extends State<AllocatorScreen> {
                         ? AppTheme.accentCyan : AppTheme.accentBlue).withValues(alpha: .4),
                     blurRadius: 14, offset: const Offset(0,4))]),
             child: Row(mainAxisAlignment: MainAxisAlignment.center, children: [
-              Icon(bothAuto ? Icons.auto_awesome_rounded : Icons.add_link_rounded,
+              Icon(bothAuto ? LucideIcons.sparkles : LucideIcons.plus,
                   color: Colors.white, size: 18),
               const SizedBox(width: 10),
               Text(bothAuto ? '＋ Add (Auto-Assign)' : '＋ Add Assignment',
@@ -1284,7 +1312,7 @@ class _AllocatorScreenState extends State<AllocatorScreen> {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Row(children: [
-              const Icon(Icons.school_rounded, color: AppTheme.accentAmber, size: 16),
+              const Icon(LucideIcons.graduationCap, color: AppTheme.accentAmber, size: 16),
               const SizedBox(width: 8),
               Text('Credit Hour Mismatches (${violations.length})',
                   style: GoogleFonts.plusJakartaSans(
@@ -1294,7 +1322,7 @@ class _AllocatorScreenState extends State<AllocatorScreen> {
             ...violations.map((v) => Padding(
               padding: const EdgeInsets.only(bottom: 4),
               child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                Icon(Icons.warning_amber_rounded,
+                Icon(LucideIcons.triangleAlert,
                     color: AppTheme.accentAmber.withValues(alpha: .7), size: 13),
                 const SizedBox(width: 6),
                 Expanded(child: Text(v, style: GoogleFonts.plusJakartaSans(
@@ -1338,7 +1366,7 @@ class _AllocatorScreenState extends State<AllocatorScreen> {
                       blurRadius: 8, offset: const Offset(0, 2))],
                 ),
                 child: Row(mainAxisSize: MainAxisSize.min, children: [
-                  const Icon(Icons.cleaning_services_rounded, color: Colors.white, size: 15),
+                  const Icon(LucideIcons.trash2, color: Colors.white, size: 15),
                   const SizedBox(width: 6),
                   Text('Auto-remove extra duplicates',
                       style: GoogleFonts.plusJakartaSans(
@@ -1350,17 +1378,40 @@ class _AllocatorScreenState extends State<AllocatorScreen> {
         ),
       );
 
-  Widget _errBanner(String e) => Container(
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(color: AppTheme.error.withValues(alpha: .08),
-          borderRadius: BorderRadius.circular(14),
-          border: Border.all(color: AppTheme.error.withValues(alpha: .3))),
-      child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        Icon(Icons.error_outline_rounded, color: AppTheme.error, size: 18),
-        const SizedBox(width: 10),
-        Expanded(child: Text(e, style: GoogleFonts.plusJakartaSans(
-            color: AppTheme.error, fontSize: 13, height: 1.5))),
-      ]));
+  Widget _errBanner(String e) {
+    final lines = e.split('\n').where((l) => l.trim().isNotEmpty).toList();
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: AppTheme.error.withValues(alpha: .08),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: AppTheme.error.withValues(alpha: .35)),
+      ),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Row(children: [
+          Container(width: 28, height: 28,
+              decoration: BoxDecoration(
+                  color: AppTheme.error.withValues(alpha: .15),
+                  borderRadius: BorderRadius.circular(8)),
+              child: const Icon(LucideIcons.circleAlert, color: AppTheme.error, size: 15)),
+          const SizedBox(width: 10),
+          Text(lines.length > 1 ? '${lines.length} clashes found' : 'Clash found',
+              style: GoogleFonts.plusJakartaSans(
+                  fontWeight: FontWeight.w800, color: AppTheme.error, fontSize: 13)),
+        ]),
+        const SizedBox(height: 8),
+        ...lines.map((line) => Padding(
+              padding: const EdgeInsets.only(top: 4),
+              child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                Icon(LucideIcons.triangleAlert, size: 12, color: AppTheme.error.withValues(alpha: .7)),
+                const SizedBox(width: 7),
+                Expanded(child: Text(line, style: GoogleFonts.plusJakartaSans(
+                    fontSize: 12, color: AppTheme.error, height: 1.5))),
+              ]),
+            )),
+      ]),
+    );
+  }
 
   List<Assignment> _filteredAssignments(DataEntryViewModel vm) {
     final q = _assignSearch.trim().toLowerCase();
@@ -1397,7 +1448,7 @@ class _AllocatorScreenState extends State<AllocatorScreen> {
                   : (ctx._dk ? AppTheme.divider : AppTheme.lightDivider)),
             ),
             child: Row(children: [
-              Icon(Icons.search_rounded, size: 16,
+              Icon(LucideIcons.search, size: 16,
                   color: searchActive ? AppTheme.accentBlue : ctx._ts),
               const SizedBox(width: 8),
               Expanded(
@@ -1416,7 +1467,7 @@ class _AllocatorScreenState extends State<AllocatorScreen> {
               if (searchActive)
                 GestureDetector(
                   onTap: () { _assignSearchCtrl.clear(); setState(() => _assignSearch = ''); },
-                  child: Icon(Icons.close_rounded, size: 16, color: ctx._ts),
+                  child: Icon(LucideIcons.x, size: 16, color: ctx._ts),
                 ),
             ]),
           ),
@@ -1433,7 +1484,7 @@ class _AllocatorScreenState extends State<AllocatorScreen> {
               border: Border.all(color: AppTheme.error.withValues(alpha: .4)),
             ),
             child: Row(mainAxisSize: MainAxisSize.min, children: [
-              Icon(Icons.auto_fix_high_rounded,
+              Icon(LucideIcons.wandSparkles,
                   color: ctx.watch<SettingsViewModel>().scheduleLocked ? AppTheme.error.withValues(alpha: 0.5) : AppTheme.error, size: 14),
               const SizedBox(width: 5),
               Text('Fix Clashes', style: GoogleFonts.plusJakartaSans(
@@ -1914,16 +1965,30 @@ class _AllocatorScreenState extends State<AllocatorScreen> {
     if (_course != null && _class != null && _teacher != null) {
       // Match by id OR code: duplicate course records (same code, different
       // ids) must still count as the same course here.
-      final existingAssignment = dataVm.assignments.where((a) =>
+      final existingSameCourseClass = dataVm.assignments.where((a) =>
       (a.course.id == _course!.id ||
               a.course.code.trim().toUpperCase() == _course!.code.trim().toUpperCase()) &&
-          a.classModel.id == _class!.id).firstOrNull;
+          a.classModel.id == _class!.id).toList();
 
-      if (existingAssignment != null) {
-        final isSameTeacher = existingAssignment.teacher.id == _teacher!.id;
-        final msg = isSameTeacher
+      final otherTeacherAssignment =
+          existingSameCourseClass.where((a) => a.teacher.id != _teacher!.id).firstOrNull;
+      final sameTeacherCount =
+          existingSameCourseClass.where((a) => a.teacher.id == _teacher!.id).length;
+
+      // A second same-teacher entry is exactly what completing a manual
+      // Bachelor split looks like (e.g. 1 day pinned, then 2 more days to
+      // finish a 3cr course) — only block it once a real duplicate is being
+      // attempted: a 3rd piece, an Intermediate class (never split), or a
+      // course whose credit hours aren't in the split-eligible 2-3 range.
+      final isSplitEligible = _class!.level == EducationLevel.bachelors &&
+          _course!.creditHours >= 2 && _course!.creditHours <= 3;
+      final blocked = otherTeacherAssignment != null ||
+          (sameTeacherCount >= 1 && (sameTeacherCount >= 2 || !isSplitEligible));
+
+      if (blocked) {
+        final msg = otherTeacherAssignment == null
             ? "You cannot assign ${_course!.code} to ${_teacher!.name} and to ${_class!.shortCode} twice"
-            : "${_course!.code} is already assigned to ${existingAssignment.teacher.name} for ${_class!.shortCode}";
+            : "${_course!.code} is already assigned to ${otherTeacherAssignment.teacher.name} for ${_class!.shortCode}";
 
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(
             content: Text(msg,
@@ -2227,12 +2292,22 @@ class _AllocatorScreenState extends State<AllocatorScreen> {
     final List<ClassModel> classesToCreate = [];
     for (final cls in targetClasses) {
       final isPrimary = cls.id == _class!.id;
-      final existingForClass = dataVm.assignments.where((a) =>
+      final existingForClassAll = dataVm.assignments.where((a) =>
       (a.course.id == _course!.id ||
               a.course.code.trim().toUpperCase() == _course!.code.trim().toUpperCase()) &&
-          a.classModel.id == cls.id).firstOrNull;
+          a.classModel.id == cls.id).toList();
+      final existingForClass = existingForClassAll.firstOrNull;
 
-      if (existingForClass != null) {
+      // Same split-completion allowance as the pre-check above: a same-
+      // teacher second piece for a Bachelor 2-3cr course is a legitimate
+      // manual split, not a duplicate — only block once it'd be a 3rd piece.
+      final isSplitPiece = existingForClass != null &&
+          existingForClass.teacher.id == _teacher!.id &&
+          existingForClassAll.length < 2 &&
+          cls.level == EducationLevel.bachelors &&
+          _course!.creditHours >= 2 && _course!.creditHours <= 3;
+
+      if (existingForClass != null && !isSplitPiece) {
         if (isPrimary) {
           // Primary already has this course — hard error
           ScaffoldMessenger.of(context).showSnackBar(SnackBar(
@@ -2374,7 +2449,7 @@ class _AllocatorScreenState extends State<AllocatorScreen> {
         builder: (_) => AlertDialog(
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
         title: Row(children: [
-          Icon(Icons.auto_fix_high_rounded, color: AppTheme.error, size: 22),
+          Icon(LucideIcons.wandSparkles, color: AppTheme.error, size: 22),
           const SizedBox(width: 10),
           Text('${fixes.length} Clash${fixes.length > 1 ? 'es' : ''} Fixed',
               style: GoogleFonts.plusJakartaSans(fontWeight: FontWeight.w800, fontSize: 17)),
@@ -2395,7 +2470,7 @@ class _AllocatorScreenState extends State<AllocatorScreen> {
                   padding: const EdgeInsets.only(bottom: 8),
                   child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
                     Icon(
-                        unresolved ? Icons.warning_amber_rounded : Icons.check_circle_outline,
+                        unresolved ? LucideIcons.triangleAlert : Icons.check_circle_outline,
                         color: unresolved ? AppTheme.accentAmber : const Color(0xFF0D9488),
                         size: 15),
                     const SizedBox(width: 8),
@@ -2627,7 +2702,7 @@ class _RoomGrid extends StatelessWidget {
             child: Row(mainAxisSize: MainAxisSize.min, children: [
               Icon(r.type == RoomType.hall ? Icons.holiday_village_rounded
                   : r.type == RoomType.other ? Icons.category_rounded
-                  : Icons.meeting_room_rounded,
+                  : LucideIcons.doorOpen,
                   size: 14, color: busy ? AppTheme.error.withValues(alpha: .55)
                       : sel ? col : freeTm),
               const SizedBox(width: 7),
@@ -2641,7 +2716,7 @@ class _RoomGrid extends StatelessWidget {
                     color: busy ? AppTheme.error.withValues(alpha: .6)
                         : sel ? col.withValues(alpha: .7) : freeTm)),
               ]),
-              if (sel && !busy) ...[const SizedBox(width: 6), Icon(Icons.check_rounded, size: 14, color: col)],
+              if (sel && !busy) ...[const SizedBox(width: 6), Icon(LucideIcons.check, size: 14, color: col)],
             ]),
           ),
         );
@@ -2669,7 +2744,7 @@ class _DaysSummary extends StatelessWidget {
           borderRadius: BorderRadius.circular(12),
           border: Border.all(color: AppTheme.accentBlue.withValues(alpha: .35), width: 1.5)),
       child: Row(children: [
-        Icon(Icons.check_circle_outline_rounded, color: AppTheme.accentBlue, size: 18),
+        Icon(LucideIcons.circleCheck, color: AppTheme.accentBlue, size: 18),
         const SizedBox(width: 10),
         Text('${sorted.length} day${sorted.length == 1 ? '' : 's'} selected  - ',
             style: GoogleFonts.plusJakartaSans(fontWeight: FontWeight.w700,
@@ -2761,7 +2836,6 @@ class _AssignmentTile extends StatelessWidget {
         : null;
     final txtPri = isDark ? AppTheme.textPrimary : AppTheme.lightText;
     final txtSec = isDark ? AppTheme.textSecondary : AppTheme.lightTextSec;
-    final txtMut = isDark ? AppTheme.textMuted : AppTheme.lightTextMut;
 
     return Container(
         padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 13),
@@ -2789,23 +2863,39 @@ class _AssignmentTile extends StatelessWidget {
                         ? assignment.course.code.substring(0,7) : assignment.course.code,
                     style: GoogleFonts.plusJakartaSans(fontWeight: FontWeight.w800,
                         color: col, fontSize: 10))),
-            const SizedBox(width: 4),
-            IconButton(
-                icon: Icon(Icons.edit_outlined, color: AppTheme.accentCyan, size: 18),
-                onPressed: onEdit,
-                splashRadius: 18,
-                tooltip: 'Edit assignment'),
-            IconButton(icon: Icon(Icons.delete_outline_rounded, color: txtMut, size: 18),
-                onPressed: onDelete, splashRadius: 18, tooltip: 'Delete'),
+            const SizedBox(width: 6),
+            _tileIconBtn(icon: LucideIcons.pencil, color: AppTheme.accentCyan,
+                tooltip: 'Edit assignment', onTap: onEdit),
+            const SizedBox(width: 6),
+            _tileIconBtn(icon: LucideIcons.trash2, color: AppTheme.error,
+                tooltip: 'Delete', onTap: onDelete),
           ]),
           const SizedBox(height: 10),
           Wrap(spacing: 6, runSpacing: 6, children: [
-            _Chip(assignment.daysLabel, col, Icons.calendar_today_rounded),
-            _Chip(ts, AppTheme.accentBlue, Icons.schedule_rounded),
-            if (rm != null) _Chip('Rm $rm', AppTheme.accentAmber, Icons.meeting_room_rounded),
-            if (assignment.autoAssigned) _Chip('Auto', AppTheme.accentCyan, Icons.auto_awesome_rounded),
+            _Chip(assignment.daysLabel, col, LucideIcons.calendar),
+            _Chip(ts, AppTheme.accentBlue, LucideIcons.clock),
+            if (rm != null) _Chip('Rm $rm', AppTheme.accentAmber, LucideIcons.doorOpen),
+            if (assignment.autoAssigned) _Chip('Auto', AppTheme.accentCyan, LucideIcons.sparkles),
           ]),
         ]));
+  }
+
+  Widget _tileIconBtn({required IconData icon, required Color color,
+      required String tooltip, required VoidCallback onTap}) {
+    return Tooltip(
+      message: tooltip,
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(9),
+        child: Container(
+          width: 30, height: 30,
+          decoration: BoxDecoration(
+              color: color.withValues(alpha: .12),
+              borderRadius: BorderRadius.circular(9)),
+          child: Icon(icon, color: color, size: 15),
+        ),
+      ),
+    );
   }
 }
 
@@ -2888,17 +2978,17 @@ class _Drop<T extends Object> extends StatelessWidget {
               suffixIcon: allowClear
                   ? Row(mainAxisSize: MainAxisSize.min, children: [
                       IconButton(
-                        icon: Icon(Icons.close_rounded, color: lblCol, size: 16),
+                        icon: Icon(LucideIcons.x, color: lblCol, size: 16),
                         onPressed: () { ctrl.clear(); onChanged(null); },
                         padding: EdgeInsets.zero,
                         constraints: const BoxConstraints(),
                         splashRadius: 14,
                       ),
                       const SizedBox(width: 8),
-                      Icon(Icons.search_rounded, color: lblCol, size: 18),
+                      Icon(LucideIcons.search, color: lblCol, size: 18),
                       const SizedBox(width: 12),
                     ])
-                  : Icon(Icons.search_rounded, color: lblCol, size: 18),
+                  : Icon(LucideIcons.search, color: lblCol, size: 18),
               filled: true, fillColor: fillCol,
               border: OutlineInputBorder(borderRadius: BorderRadius.circular(14),
                   borderSide: BorderSide(color: bdCol)),
@@ -2977,9 +3067,7 @@ class _GaPanel extends StatelessWidget {
         Container(
           padding: const EdgeInsets.fromLTRB(18, 16, 18, 16),
           decoration: BoxDecoration(
-            gradient: const LinearGradient(
-                colors: [Color(0xFF4F46E5), Color(0xFF7C3AED)],
-                begin: Alignment.topLeft, end: Alignment.bottomRight),
+            gradient: AppTheme.blueGradient,
             borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
           ),
           child: Row(children: [
@@ -2989,7 +3077,7 @@ class _GaPanel extends StatelessWidget {
                   color: Colors.white.withValues(alpha: .18),
                   borderRadius: BorderRadius.circular(10),
                   border: Border.all(color: Colors.white.withValues(alpha: .3))),
-              child: const Icon(Icons.psychology_rounded, color: Colors.white, size: 20),
+              child: const Icon(LucideIcons.brainCircuit, color: Colors.white, size: 20),
             ),
             const SizedBox(width: 14),
             Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
@@ -3027,9 +3115,7 @@ class _GaPanel extends StatelessWidget {
       case GaStatus.idle:
         return _idleBody(ts, tm);
       case GaStatus.running:
-        return _progressBody(
-            'AI is generating your timetable…\nThis may take a few seconds.',
-            AppTheme.accentBlue, ts);
+        return const _RunningGaAnimation();
       case GaStatus.failed:
         return _failedBody(ts, tm);
       case GaStatus.done:
@@ -3056,21 +3142,6 @@ class _GaPanel extends StatelessWidget {
     ],
   );
 
-  Widget _progressBody(String msg, Color col, Color ts) => Column(
-    crossAxisAlignment: CrossAxisAlignment.start,
-    children: [
-      LinearProgressIndicator(
-        backgroundColor: col.withValues(alpha: .12),
-        valueColor: AlwaysStoppedAnimation(col),
-        minHeight: 4,
-        borderRadius: BorderRadius.circular(4),
-      ),
-      const SizedBox(height: 14),
-      Text(msg, style: GoogleFonts.plusJakartaSans(
-          fontSize: 12, color: ts, height: 1.6)),
-    ],
-  );
-
 
   Widget _failedBody(Color ts, Color tm) => Container(
     padding: const EdgeInsets.all(14),
@@ -3080,7 +3151,7 @@ class _GaPanel extends StatelessWidget {
       border: Border.all(color: AppTheme.accentAmber.withValues(alpha: .3)),
     ),
     child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
-      const Icon(Icons.error_outline_rounded, color: AppTheme.accentAmber, size: 18),
+      const Icon(LucideIcons.circleAlert, color: AppTheme.accentAmber, size: 18),
       const SizedBox(width: 10),
       Expanded(child: Text(vm.errorMessage ?? 'Unknown error',
           style: GoogleFonts.plusJakartaSans(
@@ -3106,7 +3177,7 @@ class _GaPanel extends StatelessWidget {
           borderRadius: BorderRadius.circular(12),
         ),
         child: Row(children: [
-          Icon(clashFree ? Icons.check_circle_rounded : Icons.warning_amber_rounded,
+          Icon(clashFree ? LucideIcons.circleCheck : LucideIcons.triangleAlert,
               color: Colors.white, size: 20),
           const SizedBox(width: 10),
           Expanded(child: Text(r.message,
@@ -3157,41 +3228,43 @@ class _GaPanel extends StatelessWidget {
             borderRadius: BorderRadius.circular(12),
             border: Border.all(color: AppTheme.accentAmber.withValues(alpha: .4)),
           ),
-          child: const Icon(Icons.lock_person_rounded, color: AppTheme.accentAmber, size: 20),
+          child: const Icon(LucideIcons.lockKeyhole, color: AppTheme.accentAmber, size: 20),
         ),
       ),
 
-      // Run GA button
+      // Run GA button — becomes a Cancel button while a run is in flight.
       Expanded(child: GestureDetector(
-        onTap: canRun ? () => _runGA(ctx) : null,
+        onTap: vm.isRunning
+            ? () => ctx.read<BackendViewModel>().cancelGA()
+            : (canRun ? () => _runGA(ctx) : null),
         child: AnimatedContainer(
           duration: const Duration(milliseconds: 200),
           height: 48,
           decoration: BoxDecoration(
-            gradient: canRun
-                ? const LinearGradient(colors: [Color(0xFF4F46E5), Color(0xFF7C3AED)])
-                : (isLocked ? null : null),
-            color: canRun ? null : (isLocked ? AppTheme.error.withValues(alpha: 0.1) : AppTheme.divider),
+            gradient: canRun ? AppTheme.blueGradient : null,
+            color: vm.isRunning
+                ? AppTheme.error.withValues(alpha: .12)
+                : (canRun ? null : (isLocked ? AppTheme.error.withValues(alpha: 0.1) : AppTheme.divider)),
+            border: vm.isRunning ? Border.all(color: AppTheme.error.withValues(alpha: .4)) : null,
             borderRadius: BorderRadius.circular(12),
-            boxShadow: canRun ? [BoxShadow(
-                color: const Color(0xFF4F46E5).withValues(alpha: .35),
+            boxShadow: canRun && !vm.isRunning ? [BoxShadow(
+                color: AppTheme.accentBlue.withValues(alpha: .35),
                 blurRadius: 12, offset: const Offset(0, 4))] : null,
           ),
           child: Row(mainAxisAlignment: MainAxisAlignment.center, children: [
-            if (vm.isRunning)
-              const SizedBox(width: 16, height: 16,
-                  child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
-            else
-              Icon(isLocked ? Icons.lock_rounded : Icons.play_arrow_rounded, 
-                  color: isLocked ? AppTheme.error : Colors.white, size: 20),
+            Icon(
+                vm.isRunning ? LucideIcons.stopCircle
+                    : isLocked ? LucideIcons.lockKeyhole : LucideIcons.play,
+                color: vm.isRunning || isLocked ? AppTheme.error : Colors.white, size: 20),
             const SizedBox(width: 8),
             Text(
-              isLocked ? 'Schedule Locked'
-                  : vm.status == GaStatus.running ? 'Running…'
+              vm.isRunning ? 'Cancel'
+                  : isLocked ? 'Schedule Locked'
                   : vm.status == GaStatus.done ? 'Re-run GA'
                   : 'Run GA',
               style: GoogleFonts.plusJakartaSans(
-                  color: isLocked ? AppTheme.error : Colors.white, fontWeight: FontWeight.w800, fontSize: 13),
+                  color: vm.isRunning || isLocked ? AppTheme.error : Colors.white,
+                  fontWeight: FontWeight.w800, fontSize: 13),
             ),
           ]),
         ),
@@ -3208,7 +3281,7 @@ class _GaPanel extends StatelessWidget {
               borderRadius: BorderRadius.circular(12),
               border: Border.all(color: AppTheme.divider),
             ),
-            child: Icon(Icons.refresh_rounded, color: ts, size: 20),
+            child: Icon(LucideIcons.rotateCw, color: ts, size: 20),
           ),
         ),
       ],
@@ -3220,7 +3293,7 @@ class _GaPanel extends StatelessWidget {
     if (settings.scheduleLocked) {
       ScaffoldMessenger.of(ctx).showSnackBar(SnackBar(
           content: Row(children: [
-            const Icon(Icons.lock_rounded, color: Colors.white, size: 18),
+            const Icon(LucideIcons.lockKeyhole, color: Colors.white, size: 18),
             const SizedBox(width: 10),
             Expanded(child: Text('Schedule is locked. Unlock in settings to modify.',
                 style: GoogleFonts.plusJakartaSans(color: Colors.white, fontWeight: FontWeight.w600))),
@@ -3271,6 +3344,103 @@ class _GaPanel extends StatelessWidget {
 }
 
 // ── Small helper widgets for the GA panel ──────────────────────────────────
+
+/// Replaces the old flat LinearProgressIndicator while a run is in flight.
+/// The GA/CSP isolate only reports a final result, never intermediate
+/// progress — so instead of faking a percentage, this shows a pulsing
+/// brain-circuit mark with a rotating ring, cycling status phrases, and an
+/// elapsed-time counter, so a long run still reads as "alive", not stuck.
+class _RunningGaAnimation extends StatefulWidget {
+  const _RunningGaAnimation();
+  @override
+  State<_RunningGaAnimation> createState() => _RunningGaAnimationState();
+}
+
+class _RunningGaAnimationState extends State<_RunningGaAnimation>
+    with SingleTickerProviderStateMixin {
+  static const _phases = [
+    'Analyzing constraints…',
+    'Testing schedule combinations…',
+    'Resolving clashes…',
+    'Optimizing the timetable…',
+  ];
+
+  late final AnimationController _c;
+  late final DateTime _start;
+  Timer? _timer;
+  int _elapsed = 0;
+  int _phase = 0;
+
+  @override
+  void initState() {
+    super.initState();
+    _start = DateTime.now();
+    _c = AnimationController(vsync: this, duration: const Duration(milliseconds: 1600))..repeat();
+    _timer = Timer.periodic(const Duration(seconds: 1), (_) {
+      if (!mounted) return;
+      final secs = DateTime.now().difference(_start).inSeconds;
+      setState(() {
+        _elapsed = secs;
+        _phase = (secs ~/ 3) % _phases.length;
+      });
+    });
+  }
+
+  @override
+  void dispose() {
+    _c.dispose();
+    _timer?.cancel();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(children: [
+      SizedBox(
+        width: 52, height: 52,
+        child: AnimatedBuilder(
+          animation: _c,
+          builder: (context, _) {
+            final pulse = 0.92 + 0.08 * (0.5 + 0.5 * sin(_c.value * 2 * pi));
+            return Stack(alignment: Alignment.center, children: [
+              SizedBox(
+                width: 52, height: 52,
+                child: CircularProgressIndicator(
+                  strokeWidth: 2.5,
+                  backgroundColor: AppTheme.accentBlue.withValues(alpha: .12),
+                  valueColor: const AlwaysStoppedAnimation(AppTheme.accentBlue),
+                ),
+              ),
+              Transform.scale(
+                scale: pulse,
+                child: Container(
+                  width: 32, height: 32,
+                  decoration: const BoxDecoration(gradient: AppTheme.blueGradient, shape: BoxShape.circle),
+                  child: const Icon(LucideIcons.brainCircuit, color: Colors.white, size: 16),
+                ),
+              ),
+            ]);
+          },
+        ),
+      ),
+      const SizedBox(width: 16),
+      Expanded(
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          AnimatedSwitcher(
+            duration: const Duration(milliseconds: 350),
+            child: Text(_phases[_phase],
+                key: ValueKey(_phase),
+                style: GoogleFonts.plusJakartaSans(
+                    fontWeight: FontWeight.w700, fontSize: 13, color: AppTheme.accentBlue)),
+          ),
+          const SizedBox(height: 4),
+          Text('${_elapsed}s elapsed — running on-device',
+              style: GoogleFonts.plusJakartaSans(fontSize: 11, color: AppTheme.textMuted)),
+        ]),
+      ),
+    ]);
+  }
+}
 
 class _ServerDot extends StatelessWidget {
   final bool alive; final GaStatus status;
@@ -3353,7 +3523,7 @@ class _ClashTile extends StatelessWidget {
           borderRadius: BorderRadius.circular(8),
           border: Border.all(color: col.withValues(alpha: .3))),
       child: Row(mainAxisSize: MainAxisSize.min, children: [
-        Icon(count == 0 ? Icons.check_rounded : Icons.close_rounded,
+        Icon(count == 0 ? LucideIcons.check : LucideIcons.x,
             size: 12, color: col),
         const SizedBox(width: 6),
         Text('$label: $count', style: GoogleFonts.plusJakartaSans(
@@ -3822,7 +3992,7 @@ class _ElectiveGroupsSectionState extends State<_ElectiveGroupsSection>
                 decoration: BoxDecoration(
                     color: amber.withValues(alpha: .15),
                     borderRadius: BorderRadius.circular(9)),
-                child: const Icon(Icons.call_split_rounded, color: amber, size: 18)),
+                child: const Icon(LucideIcons.split, color: amber, size: 18)),
             const SizedBox(width: 12),
             Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
               Text('Elective Groups  (Inter only)',
@@ -3838,7 +4008,7 @@ class _ElectiveGroupsSectionState extends State<_ElectiveGroupsSection>
                 style: GoogleFonts.plusJakartaSans(fontSize: 11,
                     color: _editingGroupId != null ? amber : ts)),
             ])),
-            Icon(_expanded ? Icons.expand_less_rounded : Icons.expand_more_rounded, color: amber, size: 22),
+            Icon(_expanded ? LucideIcons.chevronUp : LucideIcons.chevronDown, color: amber, size: 22),
           ]),
         )),
 
@@ -3857,7 +4027,7 @@ class _ElectiveGroupsSectionState extends State<_ElectiveGroupsSection>
                   border: Border.all(color: AppTheme.accentAmber.withValues(alpha: .4)),
                 ),
                 child: Row(children: [
-                  const Icon(Icons.edit_rounded, size: 15, color: AppTheme.accentAmber),
+                  const Icon(LucideIcons.pencil, size: 15, color: AppTheme.accentAmber),
                   const SizedBox(width: 8),
                   Expanded(child: Text('Editing elective group — modify below and tap Update',
                       style: GoogleFonts.plusJakartaSans(fontSize: 12, fontWeight: FontWeight.w600, color: AppTheme.accentAmber))),
@@ -3903,7 +4073,7 @@ class _ElectiveGroupsSectionState extends State<_ElectiveGroupsSection>
                   border: Border.all(color: AppTheme.error.withValues(alpha: .4)),
                 ),
                 child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                  const Icon(Icons.error_outline_rounded, size: 16, color: AppTheme.error),
+                  const Icon(LucideIcons.circleAlert, size: 16, color: AppTheme.error),
                   const SizedBox(width: 8),
                   Expanded(child: Text(_slotConflictMessage(dataVm)!,
                       style: GoogleFonts.plusJakartaSans(fontSize: 12, fontWeight: FontWeight.w600, color: AppTheme.error))),
@@ -3941,7 +4111,7 @@ class _ElectiveGroupsSectionState extends State<_ElectiveGroupsSection>
               const Spacer(),
               TextButton.icon(
                 onPressed: _addEntry,
-                icon: const Icon(Icons.add_rounded, size: 16, color: amber),
+                icon: const Icon(LucideIcons.plus, size: 16, color: amber),
                 label: Text('Add Subject', style: GoogleFonts.plusJakartaSans(fontSize: 12, fontWeight: FontWeight.w700, color: amber)),
               ),
             ]),
@@ -3972,13 +4142,13 @@ class _ElectiveGroupsSectionState extends State<_ElectiveGroupsSection>
                     const SizedBox(width: 8),
                     Text('Subject ${i + 1}', style: GoogleFonts.plusJakartaSans(fontWeight: FontWeight.w700, fontSize: 12, color: tp)),
                     const Spacer(),
-                    IconButton(icon: const Icon(Icons.delete_outline_rounded, size: 18, color: AppTheme.error), onPressed: () => _removeEntry(i), padding: EdgeInsets.zero, constraints: const BoxConstraints()),
+                    IconButton(icon: const Icon(LucideIcons.trash2, size: 18, color: AppTheme.error), onPressed: () => _removeEntry(i), padding: EdgeInsets.zero, constraints: const BoxConstraints()),
                   ]),
                   const SizedBox(height: 10),
                   // Course — searchable, same widget as the regular Allocator form
                   _Drop<Course>(
                     key: ValueKey('elec-course-$i-${e['courseId']}'),
-                    label: 'Course', icon: Icons.menu_book_outlined,
+                    label: 'Course', icon: LucideIcons.bookOpen,
                     value: dataVm.courses.where((c) => c.id == e['courseId']).firstOrNull,
                     color: amber,
                     items: dataVm.courses.where((c) => c.level == EducationLevel.intermediate).toList(),
@@ -3989,7 +4159,7 @@ class _ElectiveGroupsSectionState extends State<_ElectiveGroupsSection>
                   // Teacher — searchable, same widget as the regular Allocator form
                   _Drop<Teacher>(
                     key: ValueKey('elec-teacher-$i-${e['teacherId']}'),
-                    label: 'Teacher', icon: Icons.person_outline_rounded,
+                    label: 'Teacher', icon: LucideIcons.user,
                     value: dataVm.teachers.where((t) => t.id == e['teacherId']).firstOrNull,
                     color: amber,
                     items: { for (final t in dataVm.teachers) t.id: t }.values.toList(),
@@ -4001,7 +4171,7 @@ class _ElectiveGroupsSectionState extends State<_ElectiveGroupsSection>
                   if (dataVm.rooms.isNotEmpty)
                     _Drop<Room>(
                       key: ValueKey('elec-room-$i-${e['roomId']}'),
-                      label: 'Room (optional)', icon: Icons.meeting_room_outlined,
+                      label: 'Room (optional)', icon: LucideIcons.doorOpen,
                       value: dataVm.rooms.where((r) => r.id == e['roomId']).firstOrNull,
                       color: amber,
                       items: dataVm.rooms,
@@ -4032,7 +4202,7 @@ class _ElectiveGroupsSectionState extends State<_ElectiveGroupsSection>
             // ── Save / Update button ──────────────────────────────────────
             SizedBox(width: double.infinity, child: ElevatedButton.icon(
               onPressed: _canSave ? _save : null,
-              icon: Icon(_editingGroupId != null ? Icons.check_circle_rounded : Icons.save_rounded, size: 18),
+              icon: Icon(_editingGroupId != null ? LucideIcons.circleCheck : LucideIcons.save, size: 18),
               label: Text(_editingGroupId != null ? 'Update Elective Group' : 'Save Elective Group',
                   style: GoogleFonts.plusJakartaSans(fontWeight: FontWeight.w700, fontSize: 14)),
               style: ElevatedButton.styleFrom(
@@ -4066,19 +4236,19 @@ class _ElectiveGroupsSectionState extends State<_ElectiveGroupsSection>
               ),
               child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
                 Row(children: [
-                  const Icon(Icons.schedule_rounded, size: 14, color: amber),
+                  const Icon(LucideIcons.clock, size: 14, color: amber),
                   const SizedBox(width: 6),
                   Text(slot != null ? 'Period ${slot.period}  (${slot.startTime}–${slot.endTime})' : grp.timeSlotId,
                       style: GoogleFonts.plusJakartaSans(fontWeight: FontWeight.w800, fontSize: 12, color: amber)),
                   const SizedBox(width: 8),
                   Expanded(child: Text('• $sections', style: GoogleFonts.plusJakartaSans(fontSize: 11, color: ts), overflow: TextOverflow.ellipsis)),
                   IconButton(
-                    icon: const Icon(Icons.edit_rounded, size: 16, color: AppTheme.accentAmber),
+                    icon: const Icon(LucideIcons.pencil, size: 16, color: AppTheme.accentAmber),
                     onPressed: () => _startEdit(grp),
                     padding: EdgeInsets.zero, constraints: const BoxConstraints(),
                   ),
                   const SizedBox(width: 2),
-                  IconButton(icon: const Icon(Icons.delete_outline_rounded, size: 18, color: AppTheme.error),
+                  IconButton(icon: const Icon(LucideIcons.trash2, size: 18, color: AppTheme.error),
                       onPressed: () => dataVm.removeElectiveGroup(grp.id), padding: EdgeInsets.zero, constraints: const BoxConstraints()),
                 ]),
                 const SizedBox(height: 6),

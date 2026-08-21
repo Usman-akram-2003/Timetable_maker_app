@@ -2,6 +2,7 @@ import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:lucide_icons_flutter/lucide_icons.dart';
 import '../../viewmodels/data_entry_viewmodel.dart';
 import '../../viewmodels/allocator_viewmodel.dart';
 import '../../viewmodels/settings_viewmodel.dart';
@@ -75,6 +76,135 @@ class _MatrixScreenState extends State<MatrixScreen>
     super.dispose();
   }
 
+  /// Classifies one fixTeacherClashes() report line by the marker DataEntryViewModel
+  /// already embeds in its `[Tag]` prefix (✓/⚠/ℹ), falling back to a keyword
+  /// scan for the many tags that carry no marker (`[Class: …]`, `[Elective]`…).
+  static ({IconData icon, Color color}) _fixMsgStyle(String msg) {
+    if (msg.contains('✓') || msg.startsWith('Done')) {
+      return (icon: LucideIcons.circleCheck, color: AppTheme.accentTeal);
+    }
+    if (msg.contains('ℹ')) {
+      return (icon: LucideIcons.info, color: AppTheme.accentCyan);
+    }
+    if (msg.contains('⚠') ||
+        msg.contains('Could not') ||
+        msg.contains('locked, not moved') ||
+        msg.contains('Not applied')) {
+      return (icon: LucideIcons.triangleAlert, color: AppTheme.error);
+    }
+    return (icon: LucideIcons.info, color: AppTheme.accentAmber);
+  }
+
+  /// Fix Now can return dozens of report lines on a heavily-clashed
+  /// timetable (see the screenshot that prompted this: a wall of text
+  /// overflowing a SnackBar) — this replaces that with a scrollable,
+  /// per-line-styled panel instead of dumping everything into one toast.
+  void _showFixNowResultsDialog(BuildContext context, List<String> msgs) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final cardBg = isDark ? AppTheme.bgCard : Colors.white;
+    final bdCol  = isDark ? AppTheme.divider : AppTheme.lightDivider;
+    final tp     = isDark ? AppTheme.textPrimary : AppTheme.lightText;
+    final ts     = isDark ? AppTheme.textSecondary : AppTheme.lightTextSec;
+    final resolved = msgs.where((m) => m.contains('✓') || m.startsWith('Done')).length;
+    final needsAttention = msgs.length - resolved;
+
+    showDialog(
+      context: context,
+      builder: (dCtx) => Dialog(
+        backgroundColor: Colors.transparent,
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 620, maxHeight: 640),
+          child: Container(
+            decoration: BoxDecoration(
+              color: cardBg,
+              borderRadius: BorderRadius.circular(20),
+              boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: .25), blurRadius: 30, offset: const Offset(0, 12))],
+            ),
+            child: Column(mainAxisSize: MainAxisSize.min, children: [
+              Container(
+                padding: const EdgeInsets.fromLTRB(20, 18, 16, 18),
+                decoration: BoxDecoration(
+                  color: AppTheme.error.withValues(alpha: .08),
+                  borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
+                  border: Border(bottom: BorderSide(color: bdCol)),
+                ),
+                child: Row(children: [
+                  Container(width: 38, height: 38,
+                      decoration: BoxDecoration(color: AppTheme.error.withValues(alpha: .15), borderRadius: BorderRadius.circular(10)),
+                      child: const Icon(LucideIcons.wandSparkles, color: AppTheme.error, size: 19)),
+                  const SizedBox(width: 12),
+                  Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                    Text('Fix Now Results', style: GoogleFonts.plusJakartaSans(fontWeight: FontWeight.w800, fontSize: 16, color: tp)),
+                    Text(
+                        resolved == 0
+                            ? '$needsAttention need${needsAttention == 1 ? 's' : ''} manual attention'
+                            : '$resolved resolved · $needsAttention need${needsAttention == 1 ? 's' : ''} manual attention',
+                        style: GoogleFonts.plusJakartaSans(fontSize: 11.5, color: ts)),
+                  ])),
+                  GestureDetector(
+                    onTap: () => Navigator.of(dCtx).pop(),
+                    child: Container(width: 30, height: 30,
+                        decoration: BoxDecoration(color: ts.withValues(alpha: .1), borderRadius: BorderRadius.circular(9)),
+                        child: Icon(LucideIcons.x, size: 15, color: ts)),
+                  ),
+                ]),
+              ),
+              Flexible(
+                child: SingleChildScrollView(
+                  padding: const EdgeInsets.all(16),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      for (final m in msgs) ...[
+                        Builder(builder: (_) {
+                          final style = _fixMsgStyle(m);
+                          return Container(
+                            margin: const EdgeInsets.only(bottom: 8),
+                            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                            decoration: BoxDecoration(
+                              color: style.color.withValues(alpha: .07),
+                              borderRadius: BorderRadius.circular(10),
+                              border: Border.all(color: style.color.withValues(alpha: .25)),
+                            ),
+                            child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                              Icon(style.icon, size: 14, color: style.color),
+                              const SizedBox(width: 9),
+                              Expanded(child: Text(m, style: GoogleFonts.plusJakartaSans(
+                                  fontSize: 12, color: tp, height: 1.45))),
+                            ]),
+                          );
+                        }),
+                      ],
+                    ],
+                  ),
+                ),
+              ),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 12),
+                decoration: BoxDecoration(border: Border(top: BorderSide(color: bdCol))),
+                child: Row(mainAxisAlignment: MainAxisAlignment.end, children: [
+                  TextButton(
+                    onPressed: () => Navigator.of(dCtx).pop(),
+                    child: Text('Close', style: GoogleFonts.plusJakartaSans(fontWeight: FontWeight.w700, color: ts)),
+                  ),
+                ]),
+              ),
+            ]),
+          ),
+        ),
+      ),
+    );
+  }
+
+  /// Icon for a clash-group header, inferred from the label AllocatorViewModel
+  /// writes ("Teacher clash: …", "Room clash: …", "Class clash: …").
+  static IconData _clashGroupIcon(String label) {
+    if (label.startsWith('Teacher')) return LucideIcons.user;
+    if (label.startsWith('Room')) return LucideIcons.doorOpen;
+    return LucideIcons.school;
+  }
+
   // Suggest Fix dialog: lists every current clash with verified, concrete
   // data-change proposals. Each is applied ONLY via its own Apply button
   // (FixSuggestion.apply re-validates and never touches manual cards).
@@ -82,99 +212,205 @@ class _MatrixScreenState extends State<MatrixScreen>
       AllocatorViewModel allocVm, int workingDays) {
     final groups = dataVm.suggestFixes(workingDays: workingDays);
     final messenger = ScaffoldMessenger.of(context);
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final cardBg = isDark ? AppTheme.bgCard : Colors.white;
+    final bdCol  = isDark ? AppTheme.divider : AppTheme.lightDivider;
+    final tp     = isDark ? AppTheme.textPrimary : AppTheme.lightText;
+    final ts     = isDark ? AppTheme.textSecondary : AppTheme.lightTextSec;
+    const amber = Color(0xFFB45309);
+
     return showDialog(
       context: context,
-      builder: (dCtx) => AlertDialog(
-        title: Text('Suggested Fixes',
-            style: GoogleFonts.plusJakartaSans(fontWeight: FontWeight.w800)),
-        content: SizedBox(
-          width: 520,
-          child: groups.isEmpty
-              ? Text('No clashes found — nothing to suggest.',
-                  style: GoogleFonts.plusJakartaSans(fontSize: 13))
-              : SingleChildScrollView(
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      for (final e in groups.entries) ...[
-                        Text(e.key,
-                            style: GoogleFonts.plusJakartaSans(
-                                fontWeight: FontWeight.w800,
-                                fontSize: 12.5,
-                                color: AppTheme.error)),
-                        const SizedBox(height: 6),
-                        if (e.value.isEmpty)
-                          Padding(
-                            padding: const EdgeInsets.only(bottom: 12),
-                            child: Text(
-                                'No safe automatic option — needs a manual '
-                                'decision (e.g. a different teacher, or free '
-                                'some space for this class).',
-                                style: GoogleFonts.plusJakartaSans(
-                                    fontSize: 12,
-                                    fontStyle: FontStyle.italic)),
-                          )
-                        else
-                          for (final s in e.value)
-                            Padding(
-                              padding: const EdgeInsets.only(bottom: 10),
-                              child: Row(children: [
-                                Expanded(
-                                    child: Text(s.description,
-                                        style: GoogleFonts.plusJakartaSans(
-                                            fontSize: 12))),
-                                const SizedBox(width: 8),
-                                FilledButton(
-                                  style: FilledButton.styleFrom(
-                                      backgroundColor:
-                                          const Color(0xFFB45309)),
-                                  onPressed: () {
-                                    dataVm.snapshotForUndo(
-                                        'Suggest fix: ${s.description}');
-                                    final msg = s.apply();
-                                    allocVm.validateAndApply(
-                                      dataVm.assignments,
-                                      dataVm.timeSlots,
-                                      combinedRules: dataVm.combinedRules,
-                                      rooms: dataVm.rooms,
-                                    );
-                                    Navigator.of(dCtx).pop();
-                                    messenger.showSnackBar(SnackBar(
-                                      duration: const Duration(seconds: 6),
-                                      content: Text(msg,
-                                          style: GoogleFonts.plusJakartaSans(
-                                              color: Colors.white,
-                                              fontWeight: FontWeight.w600)),
-                                      backgroundColor: msg.startsWith('Done')
-                                          ? AppTheme.accentTeal
-                                          : AppTheme.error,
-                                      behavior: SnackBarBehavior.floating,
-                                      shape: RoundedRectangleBorder(
-                                          borderRadius:
-                                              BorderRadius.circular(12)),
-                                    ));
-                                  },
-                                  child: Text('Apply',
-                                      style: GoogleFonts.plusJakartaSans(
-                                          fontWeight: FontWeight.w800,
-                                          fontSize: 12)),
-                                ),
-                              ]),
-                            ),
-                        const SizedBox(height: 8),
-                      ],
-                    ],
-                  ),
+      builder: (dCtx) => Dialog(
+        backgroundColor: Colors.transparent,
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 560, maxHeight: 640),
+          child: Container(
+            decoration: BoxDecoration(
+              color: cardBg,
+              borderRadius: BorderRadius.circular(20),
+              boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: .25), blurRadius: 30, offset: const Offset(0, 12))],
+            ),
+            child: Column(mainAxisSize: MainAxisSize.min, children: [
+              // ── Header ────────────────────────────────────────────────
+              Container(
+                padding: const EdgeInsets.fromLTRB(20, 18, 16, 18),
+                decoration: BoxDecoration(
+                  color: amber.withValues(alpha: .08),
+                  borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
+                  border: Border(bottom: BorderSide(color: bdCol)),
                 ),
+                child: Row(children: [
+                  Container(width: 38, height: 38,
+                      decoration: BoxDecoration(color: amber.withValues(alpha: .15), borderRadius: BorderRadius.circular(10)),
+                      child: const Icon(LucideIcons.lightbulb, color: amber, size: 19)),
+                  const SizedBox(width: 12),
+                  Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                    Text('Suggested Fixes', style: GoogleFonts.plusJakartaSans(fontWeight: FontWeight.w800, fontSize: 16, color: tp)),
+                    Text(groups.isEmpty ? 'Nothing to suggest' : '${groups.length} clash${groups.length > 1 ? 'es' : ''} reviewed',
+                        style: GoogleFonts.plusJakartaSans(fontSize: 11.5, color: ts)),
+                  ])),
+                  GestureDetector(
+                    onTap: () => Navigator.of(dCtx).pop(),
+                    child: Container(width: 30, height: 30,
+                        decoration: BoxDecoration(color: ts.withValues(alpha: .1), borderRadius: BorderRadius.circular(9)),
+                        child: Icon(LucideIcons.x, size: 15, color: ts)),
+                  ),
+                ]),
+              ),
+
+              // ── Body ──────────────────────────────────────────────────
+              Flexible(
+                child: groups.isEmpty
+                    ? Padding(
+                        padding: const EdgeInsets.all(40),
+                        child: Column(mainAxisSize: MainAxisSize.min, children: [
+                          Icon(LucideIcons.circleCheck, color: AppTheme.accentTeal, size: 40),
+                          const SizedBox(height: 12),
+                          Text('No clashes found — nothing to suggest.',
+                              textAlign: TextAlign.center,
+                              style: GoogleFonts.plusJakartaSans(fontSize: 13, color: ts)),
+                        ]),
+                      )
+                    : SingleChildScrollView(
+                        padding: const EdgeInsets.all(18),
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            for (final e in groups.entries) ...[
+                              Row(children: [
+                                Icon(_clashGroupIcon(e.key), size: 13, color: AppTheme.error),
+                                const SizedBox(width: 6),
+                                Expanded(child: Text(e.key,
+                                    style: GoogleFonts.plusJakartaSans(
+                                        fontWeight: FontWeight.w800, fontSize: 12.5, color: AppTheme.error))),
+                              ]),
+                              const SizedBox(height: 8),
+                              if (e.value.isEmpty)
+                                Container(
+                                  margin: const EdgeInsets.only(bottom: 14),
+                                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                                  decoration: BoxDecoration(
+                                    color: ts.withValues(alpha: .06),
+                                    borderRadius: BorderRadius.circular(10),
+                                    border: Border.all(color: bdCol),
+                                  ),
+                                  child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                                    Icon(LucideIcons.info, size: 14, color: ts),
+                                    const SizedBox(width: 8),
+                                    Expanded(child: Text(
+                                        'No safe automatic option — needs a manual decision '
+                                        '(e.g. a different teacher, or free some space for this class).',
+                                        style: GoogleFonts.plusJakartaSans(fontSize: 11.5, color: ts, height: 1.4))),
+                                  ]),
+                                )
+                              else
+                                for (final s in e.value)
+                                  Container(
+                                    margin: const EdgeInsets.only(bottom: 8),
+                                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                                    decoration: BoxDecoration(
+                                      color: amber.withValues(alpha: .06),
+                                      borderRadius: BorderRadius.circular(10),
+                                      border: Border.all(color: amber.withValues(alpha: .25)),
+                                    ),
+                                    child: Row(children: [
+                                      Expanded(child: Text(s.description,
+                                          style: GoogleFonts.plusJakartaSans(fontSize: 12, color: tp, height: 1.4))),
+                                      const SizedBox(width: 10),
+                                      GestureDetector(
+                                        onTap: () {
+                                          dataVm.snapshotForUndo('Suggest fix: ${s.description}');
+                                          final msg = s.apply();
+                                          allocVm.validateAndApply(
+                                            dataVm.assignments,
+                                            dataVm.timeSlots,
+                                            combinedRules: dataVm.combinedRules,
+                                            rooms: dataVm.rooms,
+                                          );
+                                          Navigator.of(dCtx).pop();
+                                          messenger.showSnackBar(SnackBar(
+                                            duration: const Duration(seconds: 6),
+                                            content: Text(msg,
+                                                style: GoogleFonts.plusJakartaSans(color: Colors.white, fontWeight: FontWeight.w600)),
+                                            backgroundColor: msg.startsWith('Done') ? AppTheme.accentTeal : AppTheme.error,
+                                            behavior: SnackBarBehavior.floating,
+                                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                                          ));
+                                        },
+                                        child: Container(
+                                          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
+                                          decoration: BoxDecoration(color: amber, borderRadius: BorderRadius.circular(8)),
+                                          child: Text('Apply', style: GoogleFonts.plusJakartaSans(
+                                              fontWeight: FontWeight.w800, fontSize: 11.5, color: Colors.white)),
+                                        ),
+                                      ),
+                                    ]),
+                                  ),
+                              const SizedBox(height: 6),
+                            ],
+                          ],
+                        ),
+                      ),
+              ),
+
+              // ── Footer ────────────────────────────────────────────────
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 12),
+                decoration: BoxDecoration(border: Border(top: BorderSide(color: bdCol))),
+                child: Row(mainAxisAlignment: MainAxisAlignment.end, children: [
+                  TextButton(
+                    onPressed: () => Navigator.of(dCtx).pop(),
+                    child: Text('Close', style: GoogleFonts.plusJakartaSans(fontWeight: FontWeight.w700, color: ts)),
+                  ),
+                ]),
+              ),
+            ]),
+          ),
         ),
-        actions: [
-          TextButton(
-              onPressed: () => Navigator.of(dCtx).pop(),
-              child: Text('Close',
-                  style: GoogleFonts.plusJakartaSans(
-                      fontWeight: FontWeight.w700))),
-        ],
+      ),
+    );
+  }
+
+  /// One action button in the clash banner (Fix Now / Suggest Fix) — a
+  /// two-line tinted card rather than a plain pill, so the two options read
+  /// as distinct choices instead of a single "resolve" action.
+  Widget _clashActionBtn({
+    required VoidCallback? onTap,
+    required bool loading,
+    required IconData icon,
+    required String label,
+    required String sublabel,
+    required Color color,
+  }) {
+    return GestureDetector(
+      onTap: onTap,
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 150),
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+        decoration: BoxDecoration(
+          color: color.withValues(alpha: loading ? .06 : .1),
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: color.withValues(alpha: loading ? .2 : .4)),
+        ),
+        child: Row(children: [
+          if (loading)
+            SizedBox(width: 18, height: 18,
+                child: CircularProgressIndicator(strokeWidth: 2, color: color))
+          else
+            Container(width: 30, height: 30,
+                decoration: BoxDecoration(color: color.withValues(alpha: .15), borderRadius: BorderRadius.circular(8)),
+                child: Icon(icon, color: color, size: 15)),
+          const SizedBox(width: 10),
+          Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Text(label, style: GoogleFonts.plusJakartaSans(
+                fontWeight: FontWeight.w800, color: color, fontSize: 12.5)),
+            Text(sublabel, style: GoogleFonts.plusJakartaSans(
+                fontSize: 9.5, color: color.withValues(alpha: .75)),
+                maxLines: 1, overflow: TextOverflow.ellipsis),
+          ])),
+        ]),
       ),
     );
   }
@@ -315,7 +551,7 @@ class _MatrixScreenState extends State<MatrixScreen>
               return ListView(
                 padding: EdgeInsets.fromLTRB(hp, 56, hp, 32),
                 children: [
-                  _header(ctx, dataVm, allocVm),
+                  _header(ctx, dataVm, allocVm, settingsVm.workingDays),
                   const SizedBox(height: 16),
                   if (settingsVm.scheduleLocked)
                     Container(
@@ -391,131 +627,115 @@ class _MatrixScreenState extends State<MatrixScreen>
                   if (clashCount > 0)
                     Container(
                       margin: const EdgeInsets.only(bottom: 14),
-                      padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 14),
                       decoration: BoxDecoration(
-                        color: AppTheme.error.withValues(alpha: .1),
-                        borderRadius: BorderRadius.circular(14),
-                        border: Border.all(color: AppTheme.error.withValues(alpha: .45)),
+                        color: ctx._cd,
+                        borderRadius: BorderRadius.circular(18),
+                        border: Border.all(color: AppTheme.error.withValues(alpha: .35)),
+                        boxShadow: [BoxShadow(
+                            color: AppTheme.error.withValues(alpha: ctx._dk ? .08 : .05),
+                            blurRadius: 18, offset: const Offset(0, 5))],
                       ),
-                      child: Row(children: [
-                        Container(width: 36, height: 36,
-                            decoration: BoxDecoration(
-                                color: AppTheme.error.withValues(alpha: .2),
-                                borderRadius: BorderRadius.circular(10)),
-                            child: const Icon(Icons.warning_amber_rounded,
-                                color: AppTheme.error, size: 20)),
-                        const SizedBox(width: 12),
-                        Expanded(child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start, children: [
-                          Text('$clashCount clash${clashCount > 1 ? "es" : ""} found',
-                              style: GoogleFonts.plusJakartaSans(
-                                  fontWeight: FontWeight.w800,
-                                  color: AppTheme.error, fontSize: 14)),
-                          Text('Tap Fix Now to auto-resolve teacher, class and room clashes.',
-                              style: GoogleFonts.plusJakartaSans(
-                                  fontSize: 11,
-                                  color: AppTheme.error.withValues(alpha: .75))),
-                        ])),
-                        const SizedBox(width: 12),
-                        GestureDetector(
-                          onTap: _fixingClashes ? null : () async {
-                            setState(() => _fixingClashes = true);
-                            final messenger = ScaffoldMessenger.of(context);
-                            await Future.delayed(Duration.zero);
-                            try {
-                              dataVm.snapshotForUndo('Fix Now');
-                              final msgs = await dataVm.fixTeacherClashes();
-                              allocVm.validateAndApply(
-                                dataVm.assignments,
-                                dataVm.timeSlots,
-                                combinedRules: dataVm.combinedRules,
-                                rooms: dataVm.rooms,
-                              );
-                              if (mounted) {
-                                messenger.showSnackBar(SnackBar(
-                                  duration: const Duration(seconds: 5),
-                                  content: Row(
-                                    crossAxisAlignment: CrossAxisAlignment.start,
-                                    children: [
-                                      Expanded(
-                                        child: Text(
-                                          msgs.isEmpty ? 'No clashes to fix.' : msgs.map((x) => '• $x').join('\n'),
-                                          style: GoogleFonts.plusJakartaSans(color: Colors.white, fontSize: 12),
-                                        ),
-                                      ),
-                                      GestureDetector(
-                                        onTap: () => messenger.hideCurrentSnackBar(),
-                                        child: const Padding(
-                                          padding: EdgeInsets.only(left: 8),
-                                          child: Icon(Icons.close, color: Colors.white, size: 18),
-                                        ),
-                                      ),
-                                    ],
-                                  ),
-                                  backgroundColor: msgs.isEmpty ? AppTheme.accentTeal : AppTheme.error,
-                                  behavior: SnackBarBehavior.floating,
-                                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                                ));
-                              }
-                            } finally {
-                              if (mounted) setState(() => _fixingClashes = false);
-                            }
-                          },
-                          child: Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-                            decoration: BoxDecoration(
-                              color: AppTheme.error.withValues(alpha: _fixingClashes ? .6 : 1),
-                              borderRadius: BorderRadius.circular(10),
-                              boxShadow: [BoxShadow(color: AppTheme.error.withValues(alpha: .35), blurRadius: 10, offset: const Offset(0, 3))],
-                            ),
-                            child: Row(mainAxisSize: MainAxisSize.min, children: [
-                              if (_fixingClashes)
-                                const SizedBox(width: 16, height: 16,
-                                    child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
-                              else
-                                const Icon(Icons.auto_fix_high_rounded, color: Colors.white, size: 16),
-                              const SizedBox(width: 6),
-                              Text(_fixingClashes ? 'Fixing…' : 'Fix Now', style: GoogleFonts.plusJakartaSans(
-                                  color: Colors.white, fontWeight: FontWeight.w800, fontSize: 13)),
-                            ]),
+                      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                        // ── Status header — dark, high-contrast, matches the
+                        // AI-Engine-style banner used elsewhere in the app ──
+                        Container(
+                          padding: const EdgeInsets.fromLTRB(18, 16, 18, 16),
+                          decoration: BoxDecoration(
+                            gradient: const LinearGradient(
+                                colors: [Color(0xFFDC2626), Color(0xFFB91C1C)],
+                                begin: Alignment.topLeft, end: Alignment.bottomRight),
+                            borderRadius: BorderRadius.circular(18),
                           ),
+                          child: Row(children: [
+                            Container(width: 38, height: 38,
+                                decoration: BoxDecoration(
+                                    color: Colors.white.withValues(alpha: .18),
+                                    borderRadius: BorderRadius.circular(10),
+                                    border: Border.all(color: Colors.white.withValues(alpha: .3))),
+                                child: const Icon(LucideIcons.triangleAlert, color: Colors.white, size: 19)),
+                            const SizedBox(width: 14),
+                            Expanded(child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start, children: [
+                              Text('$clashCount clash${clashCount > 1 ? "es" : ""} found',
+                                  style: GoogleFonts.plusJakartaSans(
+                                      fontWeight: FontWeight.w800, color: Colors.white, fontSize: 14)),
+                              Text('Teacher, class and room overlaps need attention',
+                                  style: GoogleFonts.plusJakartaSans(
+                                      fontSize: 11, color: Colors.white.withValues(alpha: .8))),
+                            ])),
+                          ]),
                         ),
-                        const SizedBox(width: 8),
-                        // Suggest Fix: what-if engine — proposes verified data
-                        // changes (teacher swap / day split / room change);
-                        // nothing is applied without an explicit Apply click.
-                        GestureDetector(
-                          onTap: _suggestingClashes ? null : () {
-                            // Re-entrancy guard: suggestFixes() is heavy and
-                            // synchronous — without this, rapid taps stacked
-                            // several dialogs and compounded the freeze. Flag is
-                            // set before the (synchronous) work so re-taps hit
-                            // the null onTap; cleared when the dialog closes.
-                            setState(() => _suggestingClashes = true);
-                            _showSuggestFixDialog(
-                                    context, dataVm, allocVm, settingsVm.workingDays)
-                                .whenComplete(() {
-                              if (mounted) setState(() => _suggestingClashes = false);
-                            });
-                          },
-                          child: Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-                            decoration: BoxDecoration(
-                              color: const Color(0xFFB45309).withValues(alpha: _suggestingClashes ? .6 : 1),
-                              borderRadius: BorderRadius.circular(10),
-                              boxShadow: [BoxShadow(color: const Color(0xFFB45309).withValues(alpha: .35), blurRadius: 10, offset: const Offset(0, 3))],
-                            ),
-                            child: Row(mainAxisSize: MainAxisSize.min, children: [
-                              if (_suggestingClashes)
-                                const SizedBox(width: 16, height: 16,
-                                    child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
-                              else
-                                const Icon(Icons.lightbulb_rounded, color: Colors.white, size: 16),
-                              const SizedBox(width: 6),
-                              Text(_suggestingClashes ? 'Working…' : 'Suggest', style: GoogleFonts.plusJakartaSans(
-                                  color: Colors.white, fontWeight: FontWeight.w800, fontSize: 13)),
-                            ]),
-                          ),
+
+                        // ── Actions ─────────────────────────────────────────
+                        Padding(
+                          padding: const EdgeInsets.fromLTRB(18, 14, 18, 16),
+                          child: Row(children: [
+                            Expanded(child: _clashActionBtn(
+                              onTap: _fixingClashes ? null : () async {
+                                setState(() => _fixingClashes = true);
+                                final messenger = ScaffoldMessenger.of(context);
+                                await Future.delayed(Duration.zero);
+                                try {
+                                  dataVm.snapshotForUndo('Fix Now');
+                                  final msgs = await dataVm.fixTeacherClashes();
+                                  allocVm.validateAndApply(
+                                    dataVm.assignments,
+                                    dataVm.timeSlots,
+                                    combinedRules: dataVm.combinedRules,
+                                    rooms: dataVm.rooms,
+                                  );
+                                  if (!context.mounted) return;
+                                  // A handful of messages fits a toast; a long,
+                                  // detailed run (the common case with many
+                                  // stuck clashes) needs a proper scrollable
+                                  // panel instead of an overflowing SnackBar.
+                                  if (msgs.length <= 1) {
+                                    messenger.showSnackBar(SnackBar(
+                                      duration: const Duration(seconds: 4),
+                                      content: Text(msgs.isEmpty ? 'No clashes to fix.' : msgs.first,
+                                          style: GoogleFonts.plusJakartaSans(color: Colors.white, fontSize: 12.5, fontWeight: FontWeight.w600)),
+                                      backgroundColor: msgs.isEmpty ? AppTheme.accentTeal : AppTheme.error,
+                                      behavior: SnackBarBehavior.floating,
+                                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                                    ));
+                                  } else {
+                                    _showFixNowResultsDialog(context, msgs);
+                                  }
+                                } finally {
+                                  if (mounted) setState(() => _fixingClashes = false);
+                                }
+                              },
+                              loading: _fixingClashes,
+                              icon: LucideIcons.wandSparkles,
+                              label: _fixingClashes ? 'Fixing…' : 'Fix Now',
+                              sublabel: 'Auto-resolve everything it can',
+                              color: AppTheme.error,
+                            )),
+                            const SizedBox(width: 10),
+                            // Suggest Fix: what-if engine — proposes verified data
+                            // changes (teacher swap / day split / room change);
+                            // nothing is applied without an explicit Apply click.
+                            Expanded(child: _clashActionBtn(
+                              onTap: _suggestingClashes ? null : () {
+                                // Re-entrancy guard: suggestFixes() is heavy and
+                                // synchronous — without this, rapid taps stacked
+                                // several dialogs and compounded the freeze. Flag is
+                                // set before the (synchronous) work so re-taps hit
+                                // the null onTap; cleared when the dialog closes.
+                                setState(() => _suggestingClashes = true);
+                                _showSuggestFixDialog(
+                                        context, dataVm, allocVm, settingsVm.workingDays)
+                                    .whenComplete(() {
+                                  if (mounted) setState(() => _suggestingClashes = false);
+                                });
+                              },
+                              loading: _suggestingClashes,
+                              icon: LucideIcons.lightbulb,
+                              label: _suggestingClashes ? 'Working…' : 'Suggest Fix',
+                              sublabel: 'Review options, apply one by one',
+                              color: const Color(0xFFB45309),
+                            )),
+                          ]),
                         ),
                       ]),
                     ),
@@ -556,7 +776,7 @@ class _MatrixScreenState extends State<MatrixScreen>
     );
   }
 
-  Widget _header(BuildContext ctx, DataEntryViewModel dataVm, AllocatorViewModel allocVm) =>
+  Widget _header(BuildContext ctx, DataEntryViewModel dataVm, AllocatorViewModel allocVm, int workingDays) =>
       Row(children: [
         Container(width: 48, height: 48,
             decoration: BoxDecoration(
@@ -677,12 +897,15 @@ class _MatrixScreenState extends State<MatrixScreen>
                 side: BorderSide(color: ctx._bd)),
             offset: const Offset(0, 50),
             onSelected: (value) async {
-              final type   = value.endsWith('student') ? ExportType.studentWise : ExportType.teacherWise;
+              final type = value.endsWith('student') ? ExportType.studentWise
+                  : value.endsWith('teacher') ? ExportType.teacherWise
+                  : ExportType.roomWise;
               try {
                 final levelSlots = _level == null ? dataVm.timeSlots.toList() : dataVm.timeSlots.where((t) => t.level == _level).toList();
                 final savedPath = await allocVm.exportSchedule(
                     format: ExportFormat.excel, type: type, timeSlots: levelSlots,
-                    rooms: dataVm.rooms, classes: dataVm.classes, electiveGroups: dataVm.electiveGroups);
+                    rooms: dataVm.rooms, classes: dataVm.classes, electiveGroups: dataVm.electiveGroups,
+                    workingDays: workingDays);
                 if (mounted) {
                   ScaffoldMessenger.of(context).showSnackBar(SnackBar(
                     duration: const Duration(seconds: 6),
@@ -727,6 +950,7 @@ class _MatrixScreenState extends State<MatrixScreen>
             itemBuilder: (context) => [
               _buildPopupItem(ctx, 'excel_student', Icons.table_chart_rounded, 'Excel — Class Wise',   AppTheme.accentTeal),
               _buildPopupItem(ctx, 'excel_teacher', Icons.table_chart_rounded, 'Excel — Teacher Wise', AppTheme.accentTeal),
+              _buildPopupItem(ctx, 'excel_room',    Icons.table_chart_rounded, 'Excel — Room Wise',    AppTheme.accentTeal),
             ],
             child: AnimatedContainer(
               duration: const Duration(milliseconds: 200),

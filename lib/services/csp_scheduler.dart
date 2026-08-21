@@ -1,5 +1,6 @@
 import 'package:flutter/foundation.dart';
 import 'ga_engine.dart';
+import 'cancelable_ga_run.dart';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // CSP (backtracking + forward checking) day/slot scheduler.
@@ -18,6 +19,13 @@ import 'ga_engine.dart';
 
 class CspScheduler {
   static Future<GaOutput> run(GaInput input) => compute(_runCsp, input);
+
+  /// Same computation, but cancellable — call the returned `cancel` to kill
+  /// the worker isolate mid-run instead of waiting for `result`.
+  static ({Future<GaOutput> result, void Function() cancel}) runCancelable(GaInput input) {
+    final r = CancelableGaRun();
+    return (result: r.run(_runCsp, input), cancel: r.cancel);
+  }
 }
 
 const _emptyBreakdown = {

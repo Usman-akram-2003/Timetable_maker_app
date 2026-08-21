@@ -1,4 +1,5 @@
-import 'dart:io' show Platform;
+import 'dart:async';
+import 'dart:io' show Platform, File, FileMode;
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
@@ -15,38 +16,134 @@ import 'app_theme.dart';
 import 'viewmodels/auth_viewmodel.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'firebase_options.dart';
-Future<void> main() async {
-  WidgetsFlutterBinding.ensureInitialized();
+import 'views/screens/splash_screen.dart';
 
-  await Firebase.initializeApp(
-    options: DefaultFirebaseOptions.currentPlatform,
-  );
-  if (!kIsWeb && (Platform.isWindows || Platform.isLinux || Platform.isMacOS)) {
-    await windowManager.ensureInitialized();
-    WindowOptions windowOptions = const WindowOptions(
-      size: Size(1280, 800),
-      minimumSize: Size(1024, 768),
-      center: true,
-      backgroundColor: Color(0xFF0B1120), // dark navy — matches app bg, keeps buttons visible
-      skipTaskbar: false,
-      titleBarStyle: TitleBarStyle.normal,
-      title: 'Timetable Maker',
+// Writes crashes to a log file next to the .exe so a silent close on a
+// machine we can't debug in person still leaves a trace to read back.
+void _logCrash(Object error, StackTrace stack) {
+  try {
+    final logFile = File('${File(Platform.resolvedExecutable).parent.path}\\crash_log.txt');
+    logFile.writeAsStringSync(
+      '\n[${DateTime.now()}] $error\n$stack\n',
+      mode: FileMode.append,
+      flush: true,
     );
-    windowManager.waitUntilReadyToShow(windowOptions, () async {
-      await windowManager.show();
-      await windowManager.focus();
-      await windowManager.setMinimizable(true);
-      await windowManager.setMaximizable(true);
-      await windowManager.setResizable(true);
+  } catch (_) {
+    // Logging itself must never throw and mask the original crash.
+  }
+}
+
+Future<void> main() async {
+  runZonedGuarded(() async {
+    WidgetsFlutterBinding.ensureInitialized();
+    FlutterError.onError = (details) {
+      _logCrash(details.exception, details.stack ?? StackTrace.current);
+      FlutterError.presentError(details);
+    };
+    PlatformDispatcher.instance.onError = (error, stack) {
+      _logCrash(error, stack);
+      return true;
+    };
+
+    if (!kIsWeb && (Platform.isWindows || Platform.isLinux || Platform.isMacOS)) {
+      await windowManager.ensureInitialized();
+      WindowOptions windowOptions = const WindowOptions(
+        size: Size(1280, 800),
+        minimumSize: Size(1024, 768),
+        center: true,
+        backgroundColor: Color(0xFF0B1120), // dark navy — matches app bg, keeps buttons visible
+        skipTaskbar: false,
+        titleBarStyle: TitleBarStyle.normal,
+        title: 'Timetable Maker',
+      );
+      windowManager.waitUntilReadyToShow(windowOptions, () async {
+        await windowManager.show();
+        await windowManager.focus();
+        await windowManager.setMinimizable(true);
+        await windowManager.setMaximizable(true);
+        await windowManager.setResizable(true);
+      });
+    }
+
+    // Renders the splash immediately; _AppRoot itself does the Firebase/prefs
+    // boot work and drives the splash's progress bar from real step
+    // completion instead of a fixed timer.
+    runApp(const _AppRoot());
+  }, (error, stack) => _logCrash(error, stack));
+}
+
+class _AppRoot extends StatefulWidget {
+  const _AppRoot();
+  @override
+  State<_AppRoot> createState() => _AppRootState();
+}
+
+class _AppRootState extends State<_AppRoot> {
+  double _progress = 0.0;
+  String _status = 'Starting…';
+  String? _firebaseError;
+  SharedPreferences? _prefs;
+
+  @override
+  void initState() {
+    super.initState();
+    _boot();
+  }
+
+  Future<void> _boot() async {
+    final started = DateTime.now();
+
+    setState(() {
+      _status = 'Connecting to Firebase…';
+      _progress = 0.15;
+    });
+    try {
+      await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
+    } catch (e, st) {
+      _logCrash(e, st);
+      _firebaseError = e.toString();
+    }
+    if (!mounted) return;
+
+    setState(() {
+      _status = 'Loading preferences…';
+      _progress = 0.65;
+    });
+    final prefs = await SharedPreferences.getInstance();
+    if (!mounted) return;
+
+    // Keep the splash up a minimum stretch so the entrance animation and the
+    // 100% state are actually visible even when boot finishes instantly.
+    final elapsed = DateTime.now().difference(started);
+    const minDisplay = Duration(milliseconds: 900);
+    if (elapsed < minDisplay) {
+      await Future.delayed(minDisplay - elapsed);
+    }
+    if (!mounted) return;
+
+    setState(() {
+      _prefs = prefs;
+      _status = 'Ready';
+      _progress = 1.0;
     });
   }
 
-  final prefs = await SharedPreferences.getInstance();
-
-  runApp(
-    MultiProvider(
+  @override
+  Widget build(BuildContext context) {
+    if (_firebaseError != null) {
+      // Without Firebase, Auth/Firestore calls later would throw again
+      // anyway — show the real reason instead of letting the window vanish.
+      return _StartupErrorApp(message: _firebaseError!);
+    }
+    if (_prefs == null) {
+      return MaterialApp(
+        debugShowCheckedModeBanner: false,
+        home: SplashScreen(progress: _progress, status: _status),
+      );
+    }
+    return MultiProvider(
       providers: [
-        ChangeNotifierProvider(create: (_) => ThemeViewModel(prefs)),
+        ChangeNotifierProvider(create: (_) => ThemeViewModel(_prefs!)),
         ChangeNotifierProvider(create: (_) => SettingsViewModel()),
         // DataEntryViewModel receives Friday settings automatically via applySettings
         ChangeNotifierProxyProvider<SettingsViewModel, DataEntryViewModel>(
@@ -61,8 +158,8 @@ Future<void> main() async {
         ChangeNotifierProvider(create: (_) => AuthViewModel()),
       ],
       child: const TimetableMakerApp(),
-    ),
-  );
+    );
+  }
 }
 
 class TimetableMakerApp extends StatelessWidget {
@@ -81,6 +178,40 @@ class TimetableMakerApp extends StatelessWidget {
       themeAnimationDuration: Duration.zero,
       themeAnimationCurve: Curves.linear,
       home: const AuthWrapper(),
+    );
+  }
+}
+
+class _StartupErrorApp extends StatelessWidget {
+  final String message;
+  const _StartupErrorApp({required this.message});
+
+  @override
+  Widget build(BuildContext context) {
+    return MaterialApp(
+      debugShowCheckedModeBanner: false,
+      home: Scaffold(
+        backgroundColor: const Color(0xFF0B1120),
+        body: Center(
+          child: Padding(
+            padding: const EdgeInsets.all(32),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const Icon(Icons.wifi_off_rounded, color: Colors.white, size: 48),
+                const SizedBox(height: 16),
+                const Text('Could not connect to Firebase',
+                    style: TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold)),
+                const SizedBox(height: 8),
+                const Text('Check your internet connection, then restart the app.',
+                    style: TextStyle(color: Colors.white70), textAlign: TextAlign.center),
+                const SizedBox(height: 16),
+                Text(message, style: const TextStyle(color: Colors.white38, fontSize: 12), textAlign: TextAlign.center),
+              ],
+            ),
+          ),
+        ),
+      ),
     );
   }
 }

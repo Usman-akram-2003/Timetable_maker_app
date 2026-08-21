@@ -8,6 +8,7 @@ import '../models/time_slot.dart';
 import '../models/time_slot_lock.dart';
 import '../services/ga_engine.dart';
 import '../services/csp_scheduler.dart';
+import '../services/cancelable_ga_run.dart';
 import '../models/combined_rule.dart';
 import '../models/elective_group.dart';
 import 'allocator_viewmodel.dart';
@@ -46,11 +47,25 @@ class BackendViewModel extends ChangeNotifier {
   GaStatus          _status      = GaStatus.idle;
   GaScheduleResult? _lastResult;
   String?           _errorMessage;
+  void Function()?  _activeCancel;
+  bool              _cancelRequested = false;
 
   GaStatus          get status       => _status;
   GaScheduleResult? get lastResult   => _lastResult;
   String?           get errorMessage => _errorMessage;
   bool              get isRunning    => _status == GaStatus.running;
+
+  /// Kills the worker isolate mid-run. Safe to call any time — a no-op
+  /// unless a run is actually in progress.
+  void cancelGA() {
+    if (_status != GaStatus.running) return;
+    _cancelRequested = true;
+    _activeCancel?.call();
+    _status       = GaStatus.idle;
+    _errorMessage = null;
+    _lastResult   = null;
+    notifyListeners();
+  }
 
   // ── Run GA ─────────────────────────────────────────────────────────────────
 
@@ -182,9 +197,10 @@ class BackendViewModel extends ChangeNotifier {
       return;
     }
 
-    _status       = GaStatus.running;
-    _errorMessage = null;
-    _lastResult   = null;
+    _status          = GaStatus.running;
+    _errorMessage    = null;
+    _lastResult      = null;
+    _cancelRequested = false;
     notifyListeners();
 
     try {
@@ -519,7 +535,16 @@ class BackendViewModel extends ChangeNotifier {
       // the schedule infeasible as given do we fall back to the GA's
       // best-effort search, so a genuinely over-constrained schedule still
       // produces *something* instead of nothing.
-      var output = await CspScheduler.run(gaInput);
+      final cspRun = CspScheduler.runCancelable(gaInput);
+      _activeCancel = cspRun.cancel;
+      GaOutput output;
+      try {
+        output = await cspRun.result;
+      } on GaCancelled {
+        return; // status/notify already handled by cancelGA()
+      }
+      if (_cancelRequested) return;
+
       if (output.chromosome.isEmpty) {
         String cspMessage = output.message;
         final fIdx = output.failureAssignmentIdx;
@@ -532,7 +557,15 @@ class BackendViewModel extends ChangeNotifier {
                 'every remaining option conflicts with an existing lock or another assignment.';
           }
         }
-        final gaOutput = await GaEngine.run(gaInput);
+        final gaRun = GaEngine.runCancelable(gaInput);
+        _activeCancel = gaRun.cancel;
+        GaOutput gaOutput;
+        try {
+          gaOutput = await gaRun.result;
+        } on GaCancelled {
+          return;
+        }
+        if (_cancelRequested) return;
         output = gaOutput.hardClashes > 0
             ? GaOutput(
                 chromosome:     gaOutput.chromosome,
@@ -544,6 +577,7 @@ class BackendViewModel extends ChangeNotifier {
               )
             : gaOutput;
       }
+      _activeCancel = null;
 
       // ── 5b. Partial-apply: isolate which independent parts of the schedule
       // are actually clash-free, instead of an all-or-nothing gate. Two
@@ -658,8 +692,11 @@ class BackendViewModel extends ChangeNotifier {
         if (applyToData) dataVm?.applyGaResults(safeGaAssignments);
       }
     } catch (e) {
+      if (_cancelRequested) return; // don't show an "error" for a deliberate cancel
       _errorMessage = 'Unexpected error: $e';
       _status       = GaStatus.failed;
+    } finally {
+      _activeCancel = null;
     }
 
     notifyListeners();
