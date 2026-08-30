@@ -730,7 +730,7 @@ class _ClassesTabState extends State<_ClassesTab> {
           _bar('Add Program', _col, isDark), const SizedBox(height: 14),
           _Field(ctrl: _prog, label: 'Program Name', icon: LucideIcons.folder, color: _col,
               hint: 'BS Computer Science, 1st Year Science…',
-              formatters: [FilteringTextInputFormatter.allow(RegExp(r'[A-Za-z -]'))],
+              formatters: [FilteringTextInputFormatter.allow(RegExp(r'[A-Za-z0-9 -]'))],
               textInputAction: TextInputAction.done, onSubmitted: (_) => _submitProg()),
           const SizedBox(height: 16),
           _editingProgId == null ? _AddBtn(color: _col, onTap: _submitProg)
@@ -875,7 +875,7 @@ class _ProgCardState extends State<_ProgCard> {
           Padding(padding: const EdgeInsets.all(14), child: Row(children: [
             Expanded(child: _Field(ctrl: widget.ctrl, label: _editingClsId == null ? 'Add Class e.g. Semester-I, Section A' : 'Edit Class',
                 icon: _editingClsId == null ? Icons.add_circle_outline_rounded : Icons.edit_rounded, color: _col,
-                formatters: [FilteringTextInputFormatter.allow(RegExp(r'[A-Za-z -]'))],
+                formatters: [FilteringTextInputFormatter.allow(RegExp(r'[A-Za-z0-9 -]'))],
                 textInputAction: TextInputAction.done, onSubmitted: (_) => _submitClass())),
             const SizedBox(width: 10),
             if (_editingClsId != null) ...[
@@ -947,8 +947,11 @@ class _RoomsTabState extends State<_RoomsTab> {
 
     return _Shell(color: AppTheme.accentAmber,
       formContent: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        _Field(ctrl: _n,   label: 'Room / Hall Name',       icon: LucideIcons.doorOpen,   color: AppTheme.accentAmber, hint: '41, 102, 305…',
-            formatters: [FilteringTextInputFormatter.allow(RegExp(r'[0-9]'))]),
+        _Field(ctrl: _n,   label: 'Room / Hall Name',       icon: LucideIcons.doorOpen,   color: AppTheme.accentAmber,
+            hint: _type == RoomType.hall ? 'Biology Lab, Organic Lab…' : '41, 102, 305…',
+            formatters: _type == RoomType.hall
+                ? [FilteringTextInputFormatter.allow(RegExp(r'[A-Za-z0-9 .-]'))]
+                : [FilteringTextInputFormatter.allow(RegExp(r'[0-9]'))]),
         const SizedBox(height: 12),
         _Field(ctrl: _cap, label: 'Capacity (optional)',    icon: Icons.people_outline_rounded,  color: AppTheme.accentAmber, hint: '40', kt: TextInputType.number,
             formatters: [FilteringTextInputFormatter.allow(RegExp(r'[0-9]'))],
@@ -1033,17 +1036,21 @@ class _TimeSlotsTabState extends State<_TimeSlotsTab> {
         ...slots.asMap().entries.map((entry) => _TSCard(key: ValueKey(entry.value.id), slot: entry.value,
           prevEndTime: entry.key > 0 ? slots[entry.key - 1].endTime : null,
           onUpdate:    (s, e) => context.read<DataEntryViewModel>().updateTimeSlot(entry.value.id, startTime: s, endTime: e),
-          onDelete:    ()     => context.read<DataEntryViewModel>().removeTimeSlot(entry.value.id))),
+          onDelete:    ()     {
+            context.read<AllocatorViewModel>().purgeByTimeSlotId(entry.value.id);
+            context.read<DataEntryViewModel>().removeTimeSlot(entry.value.id);
+          })),
         // Add slot card
         Container(padding: const EdgeInsets.all(18),
           decoration: context.glowCard(AppTheme.accentTeal, radius: 16),
           child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
             _bar('Add Time Slot', AppTheme.accentTeal, isDark), const SizedBox(height: 14),
             Row(children: [
-              Expanded(child: _TF(ctrl: _ns, label: 'Start Time', color: AppTheme.accentTeal)),
+              Expanded(child: _TimePickField(value: _ns.text, label: 'Start Time', color: AppTheme.accentTeal,
+                  onPick: (v) => setState(() => _ns.text = v))),
               const SizedBox(width: 12),
-              Expanded(child: _TF(ctrl: _ne, label: 'End Time',   color: AppTheme.accentTeal,
-                  textInputAction: TextInputAction.done, onSubmitted: (_) => _submitTimeSlot())),
+              Expanded(child: _TimePickField(value: _ne.text, label: 'End Time', color: AppTheme.accentTeal,
+                  onPick: (v) => setState(() => _ne.text = v))),
               const SizedBox(width: 12),
               GestureDetector(
                 onTap: _submitTimeSlot,
@@ -1140,6 +1147,17 @@ class _TSCardState extends State<_TSCard> {
     return false;
   }
 
+  // Only persists the edit once the range is actually valid — the old
+  // per-keystroke save let an unconverted 12-hour time (e.g. "1:30" typed
+  // for 1:30 PM) reach the Matrix's time-proportional grid, which clamps a
+  // negative duration to a 0px-wide column: the assignments in it were
+  // still there, just rendered with no width to show them in.
+  void _onTimeChanged() {
+    final invalid = _rangeInvalid;
+    setState(() {});
+    if (!invalid) widget.onUpdate(_s.text, _e.text);
+  }
+
   @override
   Widget build(BuildContext context) {
     final isDark = context._dark;
@@ -1167,18 +1185,87 @@ class _TSCardState extends State<_TSCard> {
         ]),
         const SizedBox(height: 12),
         Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          Expanded(child: _TF(ctrl: _s, label: 'Start', color: AppTheme.accentTeal,
+          Expanded(child: _TimePickField(value: _s.text, label: 'Start', color: AppTheme.accentTeal,
               error: _rangeInvalid,
-              helperText: _rangeInvalid ? '24-hr format — e.g. 13:00 for 1 PM' : null,
-              onChanged: (_) { widget.onUpdate(_s.text, _e.text); setState(() {}); })),
+              helperText: _rangeInvalid ? 'Must not overlap the period before it' : null,
+              onPick: (v) { _s.text = v; _onTimeChanged(); })),
           const SizedBox(width: 10),
-          Expanded(child: _TF(ctrl: _e, label: 'End', color: AppTheme.accentTeal,
+          Expanded(child: _TimePickField(value: _e.text, label: 'End', color: AppTheme.accentTeal,
               error: _rangeInvalid,
-              helperText: _rangeInvalid ? '24-hr format — e.g. 13:00 for 1 PM' : null,
-              textInputAction: TextInputAction.done,
-              onChanged: (_) { widget.onUpdate(_s.text, _e.text); setState(() {}); })),
+              helperText: _rangeInvalid ? 'Must be after Start' : null,
+              onPick: (v) { _e.text = v; _onTimeChanged(); })),
         ]),
       ]));
+  }
+}
+
+// A tap-to-pick time field — shows the stored "HH:mm" (24-hour, still the
+// internal format everything else parses/sorts/compares) as "h:mm AM/PM"
+// and opens the native picker instead of taking typed text, so a 12-hour
+// value can never be typed in without converting it (the mistake that used
+// to silently zero out a period's width in the Matrix's time-proportional
+// grid — see removeTimeSlot's cascade-cleanup fix from the same session).
+class _TimePickField extends StatelessWidget {
+  final String value;
+  final String label;
+  final Color color;
+  final bool error;
+  final String? helperText;
+  final ValueChanged<String> onPick;
+  const _TimePickField({required this.value, required this.label, required this.color,
+      this.error = false, this.helperText, required this.onPick});
+
+  static TimeOfDay _parse(String hhmm) {
+    final p = hhmm.split(':');
+    final h = p.isNotEmpty ? int.tryParse(p[0]) ?? 8 : 8;
+    final m = p.length > 1 ? int.tryParse(p[1]) ?? 0 : 0;
+    return TimeOfDay(hour: h.clamp(0, 23), minute: m.clamp(0, 59));
+  }
+
+  Future<void> _open(BuildContext context) async {
+    final picked = await showTimePicker(
+      context: context,
+      initialTime: _parse(value),
+      builder: (ctx, child) => MediaQuery(
+        data: MediaQuery.of(ctx).copyWith(alwaysUse24HourFormat: false),
+        child: child!,
+      ),
+    );
+    if (picked == null) return;
+    onPick('${picked.hour.toString().padLeft(2, '0')}:${picked.minute.toString().padLeft(2, '0')}');
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final isDark  = context._dark;
+    final fillCol = isDark ? AppTheme.bgMid : Colors.white;
+    final bdCol   = error ? AppTheme.error : (isDark ? AppTheme.divider : const Color(0xFFE2E8F0));
+    final txtCol  = isDark ? AppTheme.textPrimary : AppTheme.lightText;
+    final lblCol  = isDark ? AppTheme.textMuted : AppTheme.lightTextMut;
+    return GestureDetector(
+      onTap: () => _open(context),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+        decoration: BoxDecoration(
+          color: fillCol,
+          borderRadius: BorderRadius.circular(10),
+          border: Border.all(color: bdCol, width: error ? 1.5 : 1),
+        ),
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, mainAxisSize: MainAxisSize.min, children: [
+          Text(label, style: GoogleFonts.plusJakartaSans(fontSize: 11, color: lblCol)),
+          const SizedBox(height: 5),
+          Row(children: [
+            Expanded(child: Text(TimeSlot.format12(value),
+                style: GoogleFonts.plusJakartaSans(fontSize: 13, color: txtCol, fontWeight: FontWeight.w600))),
+            Icon(LucideIcons.clock, size: 15, color: lblCol),
+          ]),
+          if (helperText != null) ...[
+            const SizedBox(height: 4),
+            Text(helperText!, style: GoogleFonts.plusJakartaSans(fontSize: 9, color: error ? AppTheme.error : lblCol)),
+          ],
+        ]),
+      ),
+    );
   }
 }
 
@@ -1493,43 +1580,6 @@ class _SaveCancelBtns extends StatelessWidget {
               fontSize: 14, fontWeight: FontWeight.w700, color: Colors.white)),
         ])))),
   ]);
-}
-
-class _TF extends StatelessWidget {
-  final TextEditingController ctrl;
-  final String label;
-  final Color color;
-  final ValueChanged<String>? onChanged;
-  final String? helperText;
-  final bool error;
-  final TextInputAction? textInputAction;
-  final ValueChanged<String>? onSubmitted;
-  const _TF({required this.ctrl, required this.label, required this.color, this.onChanged, this.helperText, this.error = false,
-      this.textInputAction, this.onSubmitted});
-
-  @override
-  Widget build(BuildContext ctx) {
-    final isDark  = ctx._dark;
-    final fillCol = isDark ? AppTheme.bgMid : Colors.white;
-    final bdCol   = error ? AppTheme.error : (isDark ? AppTheme.divider : const Color(0xFFE2E8F0));
-    final txtCol  = isDark ? AppTheme.textPrimary : AppTheme.lightText;
-    final lblCol  = isDark ? AppTheme.textMuted : AppTheme.lightTextMut;
-    return TextField(
-      controller: ctrl, onChanged: onChanged,
-      textInputAction: textInputAction ?? TextInputAction.next,
-      onSubmitted: onSubmitted,
-      style: GoogleFonts.plusJakartaSans(fontSize: 13, color: txtCol),
-      decoration: InputDecoration(
-        labelText: label,
-        labelStyle: GoogleFonts.plusJakartaSans(fontSize: 11, color: lblCol),
-        helperText: helperText,
-        helperStyle: GoogleFonts.plusJakartaSans(fontSize: 9, color: error ? AppTheme.error : lblCol),
-        filled: true, fillColor: fillCol,
-        contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
-        border: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: BorderSide(color: bdCol)),
-        enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: BorderSide(color: bdCol)),
-        focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: BorderSide(color: error ? AppTheme.error : color, width: 1.5))));
-  }
 }
 
 // ── IMPORT MENU BUTTON ────────────────────────────────────────────────────────

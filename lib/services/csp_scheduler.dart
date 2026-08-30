@@ -262,6 +262,11 @@ GaOutput _runCsp(GaInput input) {
         electiveGroupIds[i].isNotEmpty && electiveGroupIds[i] == electiveGroupIds[j]) {
       return false;
     }
+    // Bachelor-only: two different courses, two different teachers, same
+    // class/section, same time — an allowed parallel session, not a clash.
+    if (levels[i] == '1' && levels[j] == '1' && teacherIds[i] != teacherIds[j]) {
+      return false;
+    }
     return true;
   }
 

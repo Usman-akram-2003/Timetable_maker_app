@@ -6,6 +6,7 @@ import '../models/class_model.dart';
 import '../models/room.dart';
 import '../models/time_slot.dart';
 import '../models/time_slot_lock.dart';
+import '../models/education_level.dart';
 import '../services/ga_engine.dart';
 import '../services/csp_scheduler.dart';
 import '../services/cancelable_ga_run.dart';
@@ -117,7 +118,12 @@ class BackendViewModel extends ChangeNotifier {
         final a = pinned[i], b = pinned[j];
         // No constraint between them → skip
         final sameTeacher = a.teacher.id.isNotEmpty && a.teacher.id == b.teacher.id;
-        final sameSection = a.classModel.id == b.classModel.id &&
+        // Bachelor-only: two different courses, two different teachers, same
+        // class/section, same time — an allowed parallel session, not a clash.
+        final bachelorParallel = a.classModel.level == EducationLevel.bachelors &&
+            b.classModel.level == EducationLevel.bachelors && !sameTeacher;
+        final sameSection = !bachelorParallel &&
+            a.classModel.id == b.classModel.id &&
             a.classModel.shortCode == b.classModel.shortCode &&
             a.course.id != b.course.id;
         if (!sameTeacher && !sameSection) continue;
@@ -622,6 +628,11 @@ class BackendViewModel extends ChangeNotifier {
         final egA = ai['elective_group_id']?.toString() ?? '';
         if (ai['is_elective'] == true && aj['is_elective'] == true &&
             egA.isNotEmpty && egA == aj['elective_group_id']) {
+          return false;
+        }
+        // Bachelor-only: two different courses, two different teachers, same
+        // class/section, same time — an allowed parallel session, not a clash.
+        if (ai['level'] == 1 && aj['level'] == 1 && ti != tj) {
           return false;
         }
         return true;

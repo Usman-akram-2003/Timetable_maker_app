@@ -18,6 +18,7 @@ class SettingsViewModel extends ChangeNotifier {
   int    _fridayMaxPeriod = 3;
   bool   _scheduleLocked  = false;
   bool   _allocRoomDefault = false;
+  double _workloadTolerance = 0.05;
 
   StreamSubscription? _sub;
 
@@ -32,6 +33,7 @@ class SettingsViewModel extends ChangeNotifier {
   int    get fridayMaxPeriod => _fridayMaxPeriod;
   bool   get scheduleLocked  => _scheduleLocked;
   bool   get allocRoomDefault => _allocRoomDefault;
+  double get workloadTolerance => _workloadTolerance;
 
   /// Per-user Firestore document — scoped to the logged-in user's UID.
   DocumentReference get _doc {
@@ -63,6 +65,7 @@ class SettingsViewModel extends ChangeNotifier {
         // ignored so a stale `true` can't silently block Friday periods.
         _scheduleLocked  = d['scheduleLocked']  as bool? ?? _scheduleLocked;
         _allocRoomDefault = d['allocRoomDefault'] as bool? ?? _allocRoomDefault;
+        _workloadTolerance = (d['workloadTolerance'] as num?)?.toDouble() ?? _workloadTolerance;
         notifyListeners();
       } else {
         // New user — save defaults to their personal path
@@ -86,6 +89,7 @@ class SettingsViewModel extends ChangeNotifier {
     _fridayMaxPeriod = 3;
     _scheduleLocked  = false;
     _allocRoomDefault = false;
+    _workloadTolerance = 0.05;
     notifyListeners();
   }
 
@@ -107,6 +111,7 @@ class SettingsViewModel extends ChangeNotifier {
       'fridayMaxPeriod': _fridayMaxPeriod,
       'scheduleLocked':  _scheduleLocked,
       'allocRoomDefault': _allocRoomDefault,
+      'workloadTolerance': _workloadTolerance,
     }, SetOptions(merge: true));
   }
 
@@ -121,6 +126,7 @@ class SettingsViewModel extends ChangeNotifier {
     'fridayMaxPeriod': _fridayMaxPeriod,
     'scheduleLocked':  _scheduleLocked,
     'allocRoomDefault': _allocRoomDefault,
+    'workloadTolerance': _workloadTolerance,
   };
 
   void importSettings(Map<String, dynamic> data) {
@@ -133,6 +139,7 @@ class SettingsViewModel extends ChangeNotifier {
     // fridayShortDay / fridayMaxPeriod intentionally not imported — feature removed.
     if (data['scheduleLocked'] != null) _scheduleLocked = data['scheduleLocked'];
     if (data['allocRoomDefault'] != null) _allocRoomDefault = data['allocRoomDefault'];
+    if (data['workloadTolerance'] != null) _workloadTolerance = (data['workloadTolerance'] as num).toDouble();
     notifyListeners();
     _saveToCloud();
   }
@@ -174,6 +181,7 @@ class SettingsViewModel extends ChangeNotifier {
     _fridayMaxPeriod = 3;
     _scheduleLocked  = false;
     _allocRoomDefault = false;
+    _workloadTolerance = 0.05;
     _saveToCloud(); notifyListeners();
   }
 
@@ -194,6 +202,11 @@ class SettingsViewModel extends ChangeNotifier {
 
   void setAllocRoomDefault(bool val) {
     _allocRoomDefault = val;
+    _saveToCloud(); notifyListeners();
+  }
+
+  void setWorkloadTolerance(double hours) {
+    _workloadTolerance = hours.clamp(0.0, 3.0);
     _saveToCloud(); notifyListeners();
   }
 }

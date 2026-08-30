@@ -21,11 +21,25 @@ class TimeSlot {
     this.fridayEnd,
   });
 
-  String get label      => 'P$period  ($startTime–$endTime)';
+  String get label      => 'P$period  (${format12(startTime)}–${format12(endTime)})';
   String get shortLabel => 'P$period';
   String get fridayLabel => (hasFridayOverride && fridayStart != null)
-      ? '$fridayStart–$fridayEnd'
-      : startTime;
+      ? '${format12(fridayStart!)}–${format12(fridayEnd!)}'
+      : format12(startTime);
+
+  /// "HH:mm" (24-hour — the internal storage format, unchanged everywhere
+  /// else: parsing, sorting, the Matrix's time-proportional column math)
+  /// formatted as "h:mm AM/PM" for display only.
+  static String format12(String hhmm) {
+    final parts = hhmm.split(':');
+    if (parts.length != 2) return hhmm;
+    final h = int.tryParse(parts[0]);
+    final m = int.tryParse(parts[1]);
+    if (h == null || m == null) return hhmm;
+    final period = h >= 12 ? 'PM' : 'AM';
+    final h12 = h % 12 == 0 ? 12 : h % 12;
+    return '$h12:${m.toString().padLeft(2, '0')} $period';
+  }
 
   TimeSlot copyWith({
     int? period,

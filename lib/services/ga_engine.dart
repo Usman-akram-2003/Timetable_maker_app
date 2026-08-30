@@ -384,7 +384,12 @@ GaOutput _runGA(GaInput input) {
               courseIds[i]     != courseIds[j]) {
             final sameEG = isElective[i] && isElective[j] &&
                 electiveGroupIds[i] == electiveGroupIds[j];
-            if (!sameEG) conflict = true;
+            // Bachelor-only: two different courses, two different teachers,
+            // same class/section, same time — an allowed parallel session,
+            // not a section clash.
+            final bachelorParallel = levels[i] == '1' && levels[j] == '1' &&
+                teacherIds[i] != teacherIds[j];
+            if (!sameEG && !bachelorParallel) conflict = true;
           }
         }
         if (!conflict && (c.rooms[i] == 0 || c.rooms[j] != c.rooms[i])) continue;
@@ -465,7 +470,7 @@ GaOutput _runGA(GaInput input) {
   final touchedKeys = <int>[];
 
   var bestScore = _fitnessC(pop.first, n, wDays, lockedStartDay, lockedSlotIdx, lockedRoomIdx,
-      disciplineIds, sectionIds, courseIds, maxStarts, slotStart, slotEnd, creditHours, teacherIds, isElective, electiveGroupIds, dtGrid, numSlots,
+      disciplineIds, sectionIds, courseIds, maxStarts, slotStart, slotEnd, creditHours, teacherIds, isElective, electiveGroupIds, levels, dtGrid, numSlots,
       phantomClassSets, phantomTeacherSets, customDays, touchedFlag, touchedKeys, overlapAdj, earliestAllowedStart);
 
   int gensRun    = 0;
@@ -501,7 +506,7 @@ GaOutput _runGA(GaInput input) {
     }
     for (int i = evalFrom; i < effectivePop; i++) {
       scores[i] = _fitnessC(pop[i], n, wDays, lockedStartDay, lockedSlotIdx, lockedRoomIdx,
-          disciplineIds, sectionIds, courseIds, maxStarts, slotStart, slotEnd, creditHours, teacherIds, isElective, electiveGroupIds, dtGrid, numSlots,
+          disciplineIds, sectionIds, courseIds, maxStarts, slotStart, slotEnd, creditHours, teacherIds, isElective, electiveGroupIds, levels, dtGrid, numSlots,
           phantomClassSets, phantomTeacherSets, customDays, touchedFlag, touchedKeys, overlapAdj, earliestAllowedStart);
     }
 
@@ -558,7 +563,7 @@ GaOutput _runGA(GaInput input) {
           lockedSlotIdx, lockedStartDay, lockedRoomIdx, mutRate, rng);
       _repairClashes(child, n, wDays, creditHours, customDays, validSlotIdxs,
           lockedSlotIdx, teacherIds, disciplineIds, sectionIds, courseIds,
-          isElective, electiveGroupIds, numSlots, rng,
+          isElective, electiveGroupIds, levels, numSlots, rng,
           dtGrid, touchedFlag, touchedKeys, roomCount, lockedRoomIdx, overlapAdj);
       nextPop.add(child);
     }
@@ -579,10 +584,13 @@ GaOutput _runGA(GaInput input) {
       if (disciplineIds[gi] == disciplineIds[gj] &&
           sectionIds[gi]    == sectionIds[gj]    &&
           courseIds[gi]     != courseIds[gj]) {
-        if (!(isElective[gi] && isElective[gj] &&
-              electiveGroupIds[gi] == electiveGroupIds[gj])) {
-          return true;
-        }
+        final sameEG = isElective[gi] && isElective[gj] &&
+            electiveGroupIds[gi] == electiveGroupIds[gj];
+        // Bachelor-only: two different courses, two different teachers,
+        // same class/section, same time — an allowed parallel session.
+        final bachelorParallel = levels[gi] == '1' && levels[gj] == '1' &&
+            teacherIds[gi] != teacherIds[gj];
+        if (!sameEG && !bachelorParallel) return true;
       }
       return false;
     }
@@ -1239,6 +1247,10 @@ GaOutput _runGA(GaInput input) {
                     courseIds[i]     != courseIds[j])) { continue; }
               if (isElective[i] && isElective[j] &&
                   electiveGroupIds[i] == electiveGroupIds[j]) { continue; }
+              // Bachelor-only: two different courses, two different teachers,
+              // same class/section, same time — an allowed parallel session.
+              if (levels[i] == '1' && levels[j] == '1' &&
+                  teacherIds[i] != teacherIds[j]) { continue; }
               // Clock overlap?
               final tsJ = bestChrom.timeSlots[j];
               final sJ = slotStart[tsJ], eJ = slotEnd[tsJ];
@@ -1338,6 +1350,7 @@ int _fitnessC(
     List<String> teacherIds,
     List<bool> isElective,
     List<String> electiveGroupIds,
+    List<String> levels,
     List<List<int>> dtGrid,
     int numSlots,
     Map<int, List<Set<String>>> phantomClassSets,
@@ -1463,7 +1476,12 @@ int _fitnessC(
     if (disciplineIds[gi] == disciplineIds[gj] &&
         sectionIds[gi]    == sectionIds[gj]    &&
         courseIds[gi]     != courseIds[gj]) {
-          if (!(isElective[gi] && isElective[gj] && electiveGroupIds[gi] == electiveGroupIds[gj])) {
+          final sameEG = isElective[gi] && isElective[gj] && electiveGroupIds[gi] == electiveGroupIds[gj];
+          // Bachelor-only: two different courses, two different teachers,
+          // same class/section, same time — an allowed parallel session.
+          final bachelorParallel = levels[gi] == '1' && levels[gj] == '1' &&
+              teacherIds[gi] != teacherIds[gj];
+          if (!sameEG && !bachelorParallel) {
               h3++;
           }
     }
@@ -1612,6 +1630,7 @@ void _repairClashes(
     List<String> courseIds,
     List<bool> isElective,
     List<String> electiveGroupIds,
+    List<String> levels,
     int numSlots,
     Random rng,
     // Shared sparse-grid buffers reused from the outer fitness evaluation —
@@ -1657,7 +1676,12 @@ void _repairClashes(
     if (disciplineIds[gi] == disciplineIds[gj] &&
         sectionIds[gi]    == sectionIds[gj]    &&
         courseIds[gi]     != courseIds[gj]) {
-      if (!(isElective[gi] && isElective[gj] && electiveGroupIds[gi] == electiveGroupIds[gj])) {
+      final sameEG = isElective[gi] && isElective[gj] && electiveGroupIds[gi] == electiveGroupIds[gj];
+      // Bachelor-only: two different courses, two different teachers,
+      // same class/section, same time — an allowed parallel session.
+      final bachelorParallel = levels[gi] == '1' && levels[gj] == '1' &&
+          teacherIds[gi] != teacherIds[gj];
+      if (!sameEG && !bachelorParallel) {
         return true;
       }
     }
@@ -1952,7 +1976,11 @@ Map<String, int> countClashesMap(
                 aj['is_elective'] == true &&
                 ai2['elective_group_id'] != null &&
                 ai2['elective_group_id'] == aj['elective_group_id'];
-            if (!sameElectiveGroup) { h3++; sectionClash = true; }
+            // Bachelor-only: two different courses, two different teachers,
+            // same class/section, same time — an allowed parallel session.
+            final bachelorParallel = ai2['level'] == 1 && aj['level'] == 1 &&
+                ai2['teacher_id'] != aj['teacher_id'];
+            if (!sameElectiveGroup && !bachelorParallel) { h3++; sectionClash = true; }
           }
           if (clashedGeneIndices != null && (teacherClash || roomClash || sectionClash)) {
             clashedGeneIndices.add(gi['assignment_idx'] as int);

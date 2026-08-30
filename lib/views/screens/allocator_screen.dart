@@ -17,10 +17,12 @@ import '../../models/time_slot.dart';
 import '../../models/assignment.dart';
 import '../../models/education_level.dart';
 import '../../models/elective_group.dart';
+import '../../models/combined_rule.dart';
 import '../../app_theme.dart';
 import '../../utils/responsive.dart';
 import '../widgets/ga_report_panel.dart';
 import '../widgets/selective_lock_dialog.dart';
+import '../widgets/search_dropdown.dart';
 
 // ── Theme helpers ─────────────────────────────────────────────────────────────
 extension _AlTh on BuildContext {
@@ -509,7 +511,7 @@ class _AllocatorScreenState extends State<AllocatorScreen> {
           text: 'Add classes, courses and teachers in Manage Data first.');
     }
     return Column(children: [
-      _Drop<ClassModel>(key: ValueKey('class-${_class?.id}'),
+      SearchDropdown<ClassModel>(key: ValueKey('class-${_class?.id}'),
           label: 'Class / Section', icon: LucideIcons.graduationCap,
           value: _class, color: AppTheme.accentBlue,
           items: { for (final c in dataVm.classes) c.id: c }.values.toList(),
@@ -528,13 +530,13 @@ class _AllocatorScreenState extends State<AllocatorScreen> {
         final coursesForClass = _class == null
             ? dataVm.courses
             : dataVm.courses.where((c) => c.level == _class!.level).toList();
-        final cDrop = _Drop<Course>(key: ValueKey('course-${_course?.id}'),
+        final cDrop = SearchDropdown<Course>(key: ValueKey('course-${_course?.id}'),
             label: 'Course', icon: LucideIcons.bookOpen,
             value: _course, color: AppTheme.accentBlue,
             items: { for (final c in coursesForClass) c.id: c }.values.toList(),
             itemLabel: (c) => '${c.name}  (${c.code})',
             onChanged: (v) => setState(() => _course = v));
-        final tDrop = _Drop<Teacher>(key: ValueKey('teacher-${_teacher?.id}'),
+        final tDrop = SearchDropdown<Teacher>(key: ValueKey('teacher-${_teacher?.id}'),
             label: 'Teacher', icon: LucideIcons.user,
             value: _teacher, color: AppTheme.accentBlue,
             items: { for (final t in dataVm.teachers) t.id: t }.values.toList(),
@@ -903,9 +905,12 @@ class _AllocatorScreenState extends State<AllocatorScreen> {
   /// Level-agnostic on purpose: a physical room is shared between
   /// Intermediate and Bachelors schedules. Used by the Room Allocation box;
   /// [excludeAssignmentId] lets an assignment being re-assigned ignore its
-  /// own current room.
+  /// own current room. [forAssignment], when given, exempts its combined-
+  /// course siblings — they're meant to share the same room at the same
+  /// time by design, not "occupy" it against each other.
   Set<String> _busyRoomIds(DataEntryViewModel dataVm,
-      {required List<int> days, required String? timeSlotId, String? excludeAssignmentId}) {
+      {required List<int> days, required String? timeSlotId, String? excludeAssignmentId,
+      Assignment? forAssignment}) {
     if (timeSlotId == null || days.isEmpty) return {};
     final tsObj = dataVm.timeSlots.where((t) => t.id == timeSlotId).firstOrNull;
     int pm(String t) {
@@ -920,6 +925,11 @@ class _AllocatorScreenState extends State<AllocatorScreen> {
       if (a.id == excludeAssignmentId) continue;
       final roomId = a.roomId;
       if (roomId == null) continue;
+      if (forAssignment != null &&
+          a.course.id == forAssignment.course.id &&
+          combinedRulesLinkClasses(dataVm.combinedRules, a.course.id, a.classModel.id, forAssignment.classModel.id)) {
+        continue;
+      }
       final aSlot = dataVm.timeSlots.where((t) => t.id == a.timeSlotId).firstOrNull;
       final timesOverlap = a.timeSlotId == timeSlotId ||
           (tsObj != null && aSlot != null && overlaps(tsObj, aSlot));
@@ -948,7 +958,8 @@ class _AllocatorScreenState extends State<AllocatorScreen> {
       return false;
     }
     return _busyRoomIds(dataVm,
-            days: a.occupiedSlots, timeSlotId: a.timeSlotId, excludeAssignmentId: a.id)
+            days: a.occupiedSlots, timeSlotId: a.timeSlotId, excludeAssignmentId: a.id,
+            forAssignment: a)
         .contains(a.roomId);
   }
 
@@ -1244,7 +1255,8 @@ class _AllocatorScreenState extends State<AllocatorScreen> {
             rooms: dataVm.rooms,
             selectedId: a.roomId,
             busyIds: _busyRoomIds(dataVm,
-                days: a.occupiedSlots, timeSlotId: a.timeSlotId, excludeAssignmentId: a.id),
+                days: a.occupiedSlots, timeSlotId: a.timeSlotId, excludeAssignmentId: a.id,
+                forAssignment: a),
             onSelect: (id) => _setRoomAndConfirm(ctx, dataVm, a, id),
           ),
           const SizedBox(height: 8),
@@ -2167,9 +2179,21 @@ class _AllocatorScreenState extends State<AllocatorScreen> {
     // ── Hard class-clash guard ─────────────────────────────────────────────
     // Prevent saving if the class already has ANY course in the chosen
     // time slot on ANY of the chosen days (would create a timetable clash).
+    // Bachelor-only exception: a different teacher teaching a different
+    // course to the same class at the same time is an allowed parallel
+    // session, not a clash.
     if (_class != null) {
-      final clashDays = sorted.where((day) =>
-          dataVm.occupiedTimeSlotIdsForClass(_class!.id, day).contains(finalPeriod)).toList();
+      final clashDays = sorted.where((day) {
+        final conflicting = dataVm.assignments.where((a) =>
+            a.classModel.id == _class!.id &&
+            a.occupiedSlots.contains(day) &&
+            a.timeSlotId == finalPeriod).toList();
+        if (conflicting.isEmpty) return false;
+        final allExempt = _class!.level == EducationLevel.bachelors &&
+            conflicting.every((a) =>
+                a.teacher.id != _teacher!.id && a.course.id != _course!.id);
+        return !allExempt;
+      }).toList();
       if (clashDays.isNotEmpty) {
         final dayNames = clashDays.map((d) => _dayShort[d - 1]).join(', ');
         final ts = dataVm.timeSlots.where((t) => t.id == finalPeriod).firstOrNull;
@@ -2326,9 +2350,20 @@ class _AllocatorScreenState extends State<AllocatorScreen> {
       }
 
       // Clash check (for this class in the chosen slot on the chosen days)
-      // Re-read after possible removal above
-      final clashDays = sorted.where((day) =>
-          dataVm.occupiedTimeSlotIdsForClass(cls.id, day).contains(finalPeriod)).toList();
+      // Re-read after possible removal above. Bachelor-only exception: a
+      // different teacher teaching a different course to the same class at
+      // the same time is an allowed parallel session, not a clash.
+      final clashDays = sorted.where((day) {
+        final conflicting = dataVm.assignments.where((a) =>
+            a.classModel.id == cls.id &&
+            a.occupiedSlots.contains(day) &&
+            a.timeSlotId == finalPeriod).toList();
+        if (conflicting.isEmpty) return false;
+        final allExempt = cls.level == EducationLevel.bachelors &&
+            conflicting.every((a) =>
+                a.teacher.id != _teacher!.id && a.course.id != _course!.id);
+        return !allExempt;
+      }).toList();
       if (clashDays.isNotEmpty) {
         final dayNames = clashDays.map((d) => _dayShort[d - 1]).join(', ');
         final ts = dataVm.timeSlots.where((t) => t.id == finalPeriod).firstOrNull;
@@ -2626,7 +2661,7 @@ class _PeriodGrid extends StatelessWidget {
                   color: busy ? AppTheme.error.withValues(alpha: .55)
                       : sel ? col : freeTs)),
               const SizedBox(height: 3),
-              Text('${ts.startTime}-${ts.endTime}', style: GoogleFonts.plusJakartaSans(
+              Text('${TimeSlot.format12(ts.startTime)}-${TimeSlot.format12(ts.endTime)}', style: GoogleFonts.plusJakartaSans(
                   fontSize: 10,
                   color: busy ? AppTheme.error.withValues(alpha: .45)
                       : sel ? col.withValues(alpha: .8) : freeTm)),
@@ -2932,107 +2967,6 @@ class _InfoBox extends StatelessWidget {
         Expanded(child: Text(text, style: GoogleFonts.plusJakartaSans(
             color: color, fontWeight: FontWeight.w600, fontSize: 13))),
       ]));
-}
-
-// Searchable dropdown: typing in the field filters the entries in a compact,
-// field-width popup — so long teacher/course/class lists don't need scrolling
-// to find one, and what you type stays visible while you type it.
-class _Drop<T extends Object> extends StatelessWidget {
-  final String label; final IconData icon; final T? value;
-  final Color color; final List<T> items; final String Function(T) itemLabel;
-  final ValueChanged<T?> onChanged;
-  // When true, shows a clear (×) button once a value is picked, for optional
-  // fields (e.g. Room) where the user needs a way back to "none".
-  final bool allowClear;
-  const _Drop({super.key, required this.label, required this.icon, required this.value,
-    required this.color, required this.items, required this.itemLabel, required this.onChanged,
-    this.allowClear = false});
-
-  @override
-  Widget build(BuildContext context) {
-    final isDark  = Theme.of(context).brightness == Brightness.dark;
-    final fillCol = isDark ? AppTheme.bgMid         : const Color(0xFFF8FAFC);
-    final bdCol   = isDark ? AppTheme.divider       : AppTheme.lightDivider;
-    final txtCol  = isDark ? AppTheme.textPrimary   : AppTheme.lightText;
-    final lblCol  = isDark ? AppTheme.textMuted     : AppTheme.lightTextMut;
-    final dropBg  = isDark ? AppTheme.bgCard        : Colors.white;
-
-    return LayoutBuilder(builder: (context, constraints) {
-      final fieldWidth = constraints.maxWidth;
-      return Autocomplete<T>(
-        initialValue: TextEditingValue(text: value != null ? itemLabel(value as T) : ''),
-        displayStringForOption: itemLabel,
-        optionsBuilder: (v) {
-          if (v.text.isEmpty) return items;
-          final q = v.text.toLowerCase();
-          return items.where((i) => itemLabel(i).toLowerCase().contains(q));
-        },
-        onSelected: onChanged,
-        fieldViewBuilder: (context, ctrl, focusNode, onSubmitted) => TextField(
-          controller: ctrl, focusNode: focusNode,
-          style: GoogleFonts.plusJakartaSans(fontSize: 14, color: txtCol),
-          decoration: InputDecoration(
-              labelText: label,
-              labelStyle: GoogleFonts.plusJakartaSans(color: lblCol, fontSize: 12),
-              prefixIcon: Icon(icon, color: lblCol, size: 18),
-              suffixIcon: allowClear
-                  ? Row(mainAxisSize: MainAxisSize.min, children: [
-                      IconButton(
-                        icon: Icon(LucideIcons.x, color: lblCol, size: 16),
-                        onPressed: () { ctrl.clear(); onChanged(null); },
-                        padding: EdgeInsets.zero,
-                        constraints: const BoxConstraints(),
-                        splashRadius: 14,
-                      ),
-                      const SizedBox(width: 8),
-                      Icon(LucideIcons.search, color: lblCol, size: 18),
-                      const SizedBox(width: 12),
-                    ])
-                  : Icon(LucideIcons.search, color: lblCol, size: 18),
-              filled: true, fillColor: fillCol,
-              border: OutlineInputBorder(borderRadius: BorderRadius.circular(14),
-                  borderSide: BorderSide(color: bdCol)),
-              enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(14),
-                  borderSide: BorderSide(color: bdCol)),
-              focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(14),
-                  borderSide: BorderSide(color: color, width: 1.5)),
-              contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16)),
-        ),
-        optionsViewBuilder: (context, onSelected, options) {
-          final list = options.toList();
-          return Align(
-            alignment: Alignment.topLeft,
-            child: Material(
-              elevation: 4, borderRadius: BorderRadius.circular(14), color: dropBg,
-              child: ConstrainedBox(
-                constraints: BoxConstraints(maxHeight: 260, maxWidth: fieldWidth),
-                child: list.isEmpty
-                    ? Padding(padding: const EdgeInsets.all(16),
-                        child: Text('No matches', style: GoogleFonts.plusJakartaSans(
-                            color: lblCol, fontSize: 13)))
-                    : ListView.builder(
-                        padding: const EdgeInsets.symmetric(vertical: 4),
-                        shrinkWrap: true,
-                        itemCount: list.length,
-                        itemBuilder: (context, i) {
-                          final opt = list[i];
-                          return InkWell(
-                            onTap: () => onSelected(opt),
-                            child: Padding(
-                              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-                              child: Text(itemLabel(opt), style: GoogleFonts.plusJakartaSans(
-                                  fontSize: 14, color: txtCol)),
-                            ),
-                          );
-                        },
-                      ),
-              ),
-            ),
-          );
-        },
-      );
-    });
-  }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -4057,7 +3991,7 @@ class _ElectiveGroupsSectionState extends State<_ElectiveGroupsSection>
               style: GoogleFonts.plusJakartaSans(color: tp, fontSize: 13),
               items: allSlots.map((ts2) => DropdownMenuItem(
                 value: ts2.id,
-                child: Text('Period ${ts2.period}  (${ts2.startTime}–${ts2.endTime})',
+                child: Text('Period ${ts2.period}  (${TimeSlot.format12(ts2.startTime)}–${TimeSlot.format12(ts2.endTime)})',
                     style: GoogleFonts.plusJakartaSans(fontSize: 13, color: tp)),
               )).toList(),
               onChanged: (v) => setState(() => _selTimeSlotId = v),
@@ -4146,7 +4080,7 @@ class _ElectiveGroupsSectionState extends State<_ElectiveGroupsSection>
                   ]),
                   const SizedBox(height: 10),
                   // Course — searchable, same widget as the regular Allocator form
-                  _Drop<Course>(
+                  SearchDropdown<Course>(
                     key: ValueKey('elec-course-$i-${e['courseId']}'),
                     label: 'Course', icon: LucideIcons.bookOpen,
                     value: dataVm.courses.where((c) => c.id == e['courseId']).firstOrNull,
@@ -4157,7 +4091,7 @@ class _ElectiveGroupsSectionState extends State<_ElectiveGroupsSection>
                   ),
                   const SizedBox(height: 8),
                   // Teacher — searchable, same widget as the regular Allocator form
-                  _Drop<Teacher>(
+                  SearchDropdown<Teacher>(
                     key: ValueKey('elec-teacher-$i-${e['teacherId']}'),
                     label: 'Teacher', icon: LucideIcons.user,
                     value: dataVm.teachers.where((t) => t.id == e['teacherId']).firstOrNull,
@@ -4169,7 +4103,7 @@ class _ElectiveGroupsSectionState extends State<_ElectiveGroupsSection>
                   const SizedBox(height: 8),
                   // Room — searchable, with a clear (×) button since it's optional
                   if (dataVm.rooms.isNotEmpty)
-                    _Drop<Room>(
+                    SearchDropdown<Room>(
                       key: ValueKey('elec-room-$i-${e['roomId']}'),
                       label: 'Room (optional)', icon: LucideIcons.doorOpen,
                       value: dataVm.rooms.where((r) => r.id == e['roomId']).firstOrNull,
@@ -4238,7 +4172,7 @@ class _ElectiveGroupsSectionState extends State<_ElectiveGroupsSection>
                 Row(children: [
                   const Icon(LucideIcons.clock, size: 14, color: amber),
                   const SizedBox(width: 6),
-                  Text(slot != null ? 'Period ${slot.period}  (${slot.startTime}–${slot.endTime})' : grp.timeSlotId,
+                  Text(slot != null ? 'Period ${slot.period}  (${TimeSlot.format12(slot.startTime)}–${TimeSlot.format12(slot.endTime)})' : grp.timeSlotId,
                       style: GoogleFonts.plusJakartaSans(fontWeight: FontWeight.w800, fontSize: 12, color: amber)),
                   const SizedBox(width: 8),
                   Expanded(child: Text('• $sections', style: GoogleFonts.plusJakartaSans(fontSize: 11, color: ts), overflow: TextOverflow.ellipsis)),

@@ -1,4 +1,3 @@
-import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:google_fonts/google_fonts.dart';
@@ -10,6 +9,8 @@ import '../../models/assignment.dart';
 import '../../models/class_model.dart';
 import '../../models/education_level.dart';
 import '../../models/elective_group.dart';
+import '../../models/combined_rule.dart';
+import '../../models/shift_rule.dart';
 import '../../models/teacher.dart';
 import '../../models/time_slot.dart';
 import '../../app_theme.dart';
@@ -62,8 +63,10 @@ String? formatDaysLabel(List<int> days) {
 class _MatrixScreenState extends State<MatrixScreen>
     with SingleTickerProviderStateMixin {
   _MatrixView _view = _MatrixView.classPeriod;
-  EducationLevel? _level;
-  String? _classFilter; // classModel.id — null = all classes
+  // Never null in practice — the matrix always shows exactly one level at a
+  // time (switched via the header filter pill), never both stacked together.
+  EducationLevel? _level = EducationLevel.bachelors;
+  Set<String> _classFilters = {}; // classModel.ids — empty = all classes
   bool _clashFreeDismissed = false;
   bool _fixingClashes = false;
   bool _suggestingClashes = false;
@@ -390,24 +393,21 @@ class _MatrixScreenState extends State<MatrixScreen>
         duration: const Duration(milliseconds: 150),
         padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
         decoration: BoxDecoration(
-          color: color.withValues(alpha: loading ? .06 : .1),
+          color: loading ? color.withValues(alpha: .55) : color,
           borderRadius: BorderRadius.circular(12),
-          border: Border.all(color: color.withValues(alpha: loading ? .2 : .4)),
         ),
         child: Row(children: [
           if (loading)
-            SizedBox(width: 18, height: 18,
-                child: CircularProgressIndicator(strokeWidth: 2, color: color))
+            const SizedBox(width: 18, height: 18,
+                child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
           else
-            Container(width: 30, height: 30,
-                decoration: BoxDecoration(color: color.withValues(alpha: .15), borderRadius: BorderRadius.circular(8)),
-                child: Icon(icon, color: color, size: 15)),
+            Icon(icon, color: Colors.white, size: 18),
           const SizedBox(width: 10),
           Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
             Text(label, style: GoogleFonts.plusJakartaSans(
-                fontWeight: FontWeight.w800, color: color, fontSize: 12.5)),
+                fontWeight: FontWeight.w800, color: Colors.white, fontSize: 12.5)),
             Text(sublabel, style: GoogleFonts.plusJakartaSans(
-                fontSize: 9.5, color: color.withValues(alpha: .75)),
+                fontSize: 9.5, color: Colors.white.withValues(alpha: .85)),
                 maxLines: 1, overflow: TextOverflow.ellipsis),
           ])),
         ]),
@@ -420,6 +420,38 @@ class _MatrixScreenState extends State<MatrixScreen>
   String _classChipLabel(DataEntryViewModel dataVm, ClassModel c) {
     final prog = dataVm.programs.where((p) => p.id == c.programId).firstOrNull?.name ?? '';
     return prog.isEmpty ? c.name : '$prog-${c.name}';
+  }
+
+  // ── Solid-color design tokens ─────────────────────────────────────────
+  // Flat, fully-opaque fills for schedule cards — replaces the old
+  // translucent (.withValues(alpha:)) look across all three matrix views.
+  // Dark theme keeps deep saturated fills with white text; light theme
+  // uses lighter pastel fills with dark-saturated text — a deep-700 fill
+  // read as too heavy against the light theme's white background.
+  static ({Color bg, Color fg, Color fgSoft}) _cellPalette(
+      {required bool clash, required bool elective, required bool bach, required bool isDark}) {
+    if (isDark) {
+      if (clash) return (bg: const Color(0xFFB91C1C), fg: Colors.white, fgSoft: const Color(0xFFFCA5A5));
+      if (elective) return (bg: const Color(0xFFB45309), fg: Colors.white, fgSoft: const Color(0xFFFDE68A));
+      return bach
+          ? (bg: const Color(0xFF0E7490), fg: Colors.white, fgSoft: const Color(0xFFA5F3FC))
+          : (bg: const Color(0xFF1D4ED8), fg: Colors.white, fgSoft: const Color(0xFFBFDBFE));
+    }
+    if (clash) return (bg: const Color(0xFFFEE2E2), fg: const Color(0xFFB91C1C), fgSoft: const Color(0xFFDC2626));
+    if (elective) return (bg: const Color(0xFFFEF3C7), fg: const Color(0xFFB45309), fgSoft: const Color(0xFFD97706));
+    return bach
+        ? (bg: const Color(0xFFCFFAFE), fg: const Color(0xFF0E7490), fgSoft: const Color(0xFF0891B2))
+        : (bg: const Color(0xFFDBEAFE), fg: const Color(0xFF1D4ED8), fgSoft: const Color(0xFF2563EB));
+  }
+
+  // Fixed, compact column width — replaces the old time-proportional layout
+  // whose columns for a full Bachelor day (P1-P6) added up to wider than the
+  // screen, so an evening-shift class's P4-P6 assignments sat off to the
+  // right and needed a horizontal scroll to find. Every period now gets an
+  // equal share of the available width, clamped to a legible range.
+  static double _fixedColW(double avail, double rowLblW, int count) {
+    if (count <= 0) return 150.0;
+    return ((avail - rowLblW) / count).clamp(110.0, 190.0);
   }
 
   @override
@@ -501,13 +533,11 @@ class _MatrixScreenState extends State<MatrixScreen>
               void checkPair(Assignment a, Assignment b) {
                 final shared = a.occupiedSlots.toSet().intersection(b.occupiedSlots.toSet());
                 if (shared.isEmpty) return;
-                // Skip legitimate combined courses
-                if (a.course.id == b.course.id) {
-                  final isCombined = dataVm.combinedRules.any((r) =>
-                      r.courseId == a.course.id &&
-                      r.classIds.contains(a.classModel.id) &&
-                      r.classIds.contains(b.classModel.id));
-                  if (isCombined) return;
+                // Skip legitimate combined courses — directly or
+                // transitively combined through a shared class.
+                if (a.course.id == b.course.id &&
+                    combinedRulesLinkClasses(dataVm.combinedRules, a.course.id, a.classModel.id, b.classModel.id)) {
+                  return;
                 }
                 // Only skip when BOTH assignments belong to the SAME elective group.
                 // If a class has an elective AND a regular assignment in the same slot → real clash.
@@ -515,8 +545,15 @@ class _MatrixScreenState extends State<MatrixScreen>
                 final bEgId = egIdCache[b.id];
                 if (aEgId != null && aEgId == bEgId) return; // same group = intentional split
 
+                // Bachelor-only: two different courses, two different
+                // teachers, same class, same time — an allowed parallel
+                // session, not a clash.
+                final bachelorParallel = a.classModel.level == EducationLevel.bachelors &&
+                    b.classModel.level == EducationLevel.bachelors &&
+                    a.teacher.id != b.teacher.id;
+
                 if ((a.teacher.id.isNotEmpty && a.teacher.id == b.teacher.id) ||
-                    a.classModel.id == b.classModel.id ||
+                    (a.classModel.id == b.classModel.id && !bachelorParallel) ||
                     (a.hasRoom &&
                         b.hasRoom &&
                         a.roomId == b.roomId &&
@@ -558,28 +595,27 @@ class _MatrixScreenState extends State<MatrixScreen>
                       margin: const EdgeInsets.only(bottom: 14),
                       padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 12),
                       decoration: BoxDecoration(
-                        color: const Color(0xFFEF4444).withValues(alpha: .1),
+                        color: const Color(0xFFB91C1C),
                         borderRadius: BorderRadius.circular(14),
-                        border: Border.all(color: const Color(0xFFEF4444).withValues(alpha: .45)),
                       ),
                       child: Row(children: [
                         Container(width: 32, height: 32,
                             decoration: BoxDecoration(
-                                color: const Color(0xFFEF4444).withValues(alpha: .2),
+                                color: Colors.white.withValues(alpha: .18),
                                 borderRadius: BorderRadius.circular(9)),
                             child: const Icon(Icons.lock_rounded,
-                                color: Color(0xFFEF4444), size: 18)),
+                                color: Colors.white, size: 18)),
                         const SizedBox(width: 12),
                         Expanded(child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start, children: [
-                          Text('🔒  Schedule is Locked',
+                          Text('Schedule is Locked',
                               style: GoogleFonts.plusJakartaSans(
                                   fontWeight: FontWeight.w800,
-                                  color: const Color(0xFFEF4444), fontSize: 13)),
+                                  color: Colors.white, fontSize: 13)),
                           Text('Go to settings to unlock the schedule to make changes.',
                               style: GoogleFonts.plusJakartaSans(
                                   fontSize: 11,
-                                  color: const Color(0xFFEF4444).withValues(alpha: .85))),
+                                  color: Color(0xFFFECACA))),
                         ])),
                       ]),
                     ),
@@ -588,28 +624,27 @@ class _MatrixScreenState extends State<MatrixScreen>
                       margin: const EdgeInsets.only(bottom: 14),
                       padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 12),
                       decoration: BoxDecoration(
-                        color: const Color(0xFF059669).withValues(alpha: .1),
+                        color: const Color(0xFF0F766E),
                         borderRadius: BorderRadius.circular(14),
-                        border: Border.all(color: const Color(0xFF059669).withValues(alpha: .45)),
                       ),
                       child: Row(children: [
                         Container(width: 32, height: 32,
                             decoration: BoxDecoration(
-                                color: const Color(0xFF059669).withValues(alpha: .2),
+                                color: Colors.white.withValues(alpha: .18),
                                 borderRadius: BorderRadius.circular(9)),
                             child: const Icon(Icons.check_circle_rounded,
-                                color: Color(0xFF059669), size: 18)),
+                                color: Colors.white, size: 18)),
                         const SizedBox(width: 12),
                         Expanded(child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start, children: [
-                          Text('✅  Schedule is clash-free',
+                          Text('Schedule is clash-free',
                               style: GoogleFonts.plusJakartaSans(
                                   fontWeight: FontWeight.w800,
-                                  color: Color(0xFF059669), fontSize: 13)),
+                                  color: Colors.white, fontSize: 13)),
                           Text('No teacher, class or room overlaps detected.',
                               style: GoogleFonts.plusJakartaSans(
                                   fontSize: 11,
-                                  color: Color(0xFF059669).withValues(alpha: .75))),
+                                  color: Color(0xFFCCFBF1))),
                         ])),
                         const SizedBox(width: 8),
                         GestureDetector(
@@ -617,10 +652,10 @@ class _MatrixScreenState extends State<MatrixScreen>
                           child: Container(
                             width: 28, height: 28,
                             decoration: BoxDecoration(
-                                color: const Color(0xFF059669).withValues(alpha: .15),
+                                color: Colors.white.withValues(alpha: .15),
                                 borderRadius: BorderRadius.circular(8)),
                             child: const Icon(Icons.close_rounded,
-                                color: Color(0xFF059669), size: 16)),
+                                color: Colors.white, size: 16)),
                         ),
                       ]),
                     ),
@@ -630,20 +665,13 @@ class _MatrixScreenState extends State<MatrixScreen>
                       decoration: BoxDecoration(
                         color: ctx._cd,
                         borderRadius: BorderRadius.circular(18),
-                        border: Border.all(color: AppTheme.error.withValues(alpha: .35)),
-                        boxShadow: [BoxShadow(
-                            color: AppTheme.error.withValues(alpha: ctx._dk ? .08 : .05),
-                            blurRadius: 18, offset: const Offset(0, 5))],
                       ),
                       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                        // ── Status header — dark, high-contrast, matches the
-                        // AI-Engine-style banner used elsewhere in the app ──
+                        // ── Status header — solid, high-contrast ──
                         Container(
                           padding: const EdgeInsets.fromLTRB(18, 16, 18, 16),
                           decoration: BoxDecoration(
-                            gradient: const LinearGradient(
-                                colors: [Color(0xFFDC2626), Color(0xFFB91C1C)],
-                                begin: Alignment.topLeft, end: Alignment.bottomRight),
+                            color: const Color(0xFFDC2626),
                             borderRadius: BorderRadius.circular(18),
                           ),
                           child: Row(children: [
@@ -801,63 +829,54 @@ class _MatrixScreenState extends State<MatrixScreen>
               style: GoogleFonts.plusJakartaSans(fontSize: 13, color: ctx._ts)),
         ]),
         const Spacer(),
-        if (allocVm.hasSchedule) Row(children: [
-          GestureDetector(
-            onTap: () => _showFilterPanel(ctx, dataVm),
-            child: AnimatedContainer(
-              duration: const Duration(milliseconds: 200),
-              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-              decoration: BoxDecoration(
-                color: (_level != null || _classFilter != null)
-                    ? AppTheme.accentBlue.withValues(alpha: .12)
-                    : ctx._hd,
-                borderRadius: BorderRadius.circular(12),
-                border: Border.all(color: (_level != null || _classFilter != null)
-                    ? AppTheme.accentBlue.withValues(alpha: .5)
-                    : ctx._bd),
+        // Gate on dataVm's own data, same as the matrix body below (line
+        // ~791) — allocVm.hasSchedule reflects a GA-run's cached schedule,
+        // which stays empty until Generate/Fix Now/Suggest Fix/import runs
+        // validateAndApply at least once. That left this whole row (level
+        // filter included) hidden for any schedule built by hand or import
+        // alone, exactly when clashes need the filter to switch levels.
+        if (dataVm.assignments.isNotEmpty || dataVm.electiveGroups.isNotEmpty) Row(children: [
+          Builder(builder: (_) {
+            final levelColor = _level == EducationLevel.bachelors ? AppTheme.accentCyan : AppTheme.accentBlue;
+            final label = _classFilters.isEmpty
+                ? (_level == EducationLevel.intermediate ? 'Intermediate' : 'Bachelors')
+                : _classFilters.length == 1
+                    ? (dataVm.classes.where((c) => c.id == _classFilters.first).firstOrNull != null
+                        ? _classChipLabel(dataVm, dataVm.classes.where((c) => c.id == _classFilters.first).first)
+                        : 'Class')
+                    : '${_classFilters.length} classes';
+            return GestureDetector(
+              onTap: () => _showFilterPanel(ctx, dataVm),
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                decoration: BoxDecoration(color: levelColor, borderRadius: BorderRadius.circular(12)),
+                child: Row(children: [
+                  const Icon(Icons.filter_list_rounded, color: Colors.white, size: 16),
+                  const SizedBox(width: 6),
+                  Text(label, style: GoogleFonts.plusJakartaSans(
+                      fontWeight: FontWeight.w800, color: Colors.white, fontSize: 12)),
+                  const SizedBox(width: 2),
+                  const Icon(Icons.arrow_drop_down_rounded, color: Colors.white, size: 16),
+                ]),
               ),
-              child: Row(children: [
-                Icon(Icons.filter_list_rounded,
-                    color: (_level != null || _classFilter != null) ? AppTheme.accentBlue : ctx._ts,
-                    size: 16),
-                const SizedBox(width: 6),
-                Text(
-                  _classFilter != null
-                      ? (dataVm.classes.where((c) => c.id == _classFilter).firstOrNull != null
-                          ? _classChipLabel(dataVm, dataVm.classes.where((c) => c.id == _classFilter).first)
-                          : 'Class')
-                      : (_level == EducationLevel.intermediate ? 'Intermediate'
-                          : _level == EducationLevel.bachelors ? 'Bachelors' : 'All Levels'),
-                  style: GoogleFonts.plusJakartaSans(
-                      fontWeight: FontWeight.w700,
-                      color: (_level != null || _classFilter != null) ? AppTheme.accentBlue : ctx._tp,
-                      fontSize: 12),
-                ),
-                const SizedBox(width: 2),
-                Icon(Icons.arrow_drop_down_rounded,
-                    color: (_level != null || _classFilter != null) ? AppTheme.accentBlue : ctx._ts,
-                    size: 16),
-              ]),
-            ),
-          ),
+            );
+          }),
           const SizedBox(width: 12),
 
           // ── Teacher Transfers button ──────────────────────────────────
           GestureDetector(
             onTap: () => _showTransferDialog(ctx, dataVm),
-            child: AnimatedContainer(
-              duration: const Duration(milliseconds: 200),
+            child: Container(
               padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
               decoration: BoxDecoration(
-                color: const Color(0xFFF97316).withValues(alpha: .12),
+                color: const Color(0xFFC2410C),
                 borderRadius: BorderRadius.circular(12),
-                border: Border.all(color: const Color(0xFFF97316).withValues(alpha: .45)),
               ),
               child: Row(children: [
-                const Icon(Icons.swap_horiz_rounded, color: Color(0xFFF97316), size: 18),
+                const Icon(Icons.swap_horiz_rounded, color: Colors.white, size: 18),
                 const SizedBox(width: 8),
                 Text('Transfers & Swap', style: GoogleFonts.plusJakartaSans(
-                    fontWeight: FontWeight.w800, color: const Color(0xFFF97316), fontSize: 13)),
+                    fontWeight: FontWeight.w800, color: Colors.white, fontSize: 13)),
               ]),
             ),
           ),
@@ -872,19 +891,17 @@ class _MatrixScreenState extends State<MatrixScreen>
               barrierDismissible: false,
               builder: (_) => _MoveCourseDialog(dataVm: dataVm),
             ),
-            child: AnimatedContainer(
-              duration: const Duration(milliseconds: 200),
+            child: Container(
               padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
               decoration: BoxDecoration(
-                color: AppTheme.accentCyan.withValues(alpha: .12),
+                color: const Color(0xFF0E7490),
                 borderRadius: BorderRadius.circular(12),
-                border: Border.all(color: AppTheme.accentCyan.withValues(alpha: .45)),
               ),
               child: Row(children: [
-                const Icon(Icons.open_with_rounded, color: AppTheme.accentCyan, size: 18),
+                const Icon(Icons.open_with_rounded, color: Colors.white, size: 18),
                 const SizedBox(width: 8),
                 Text('Move Course', style: GoogleFonts.plusJakartaSans(
-                    fontWeight: FontWeight.w800, color: AppTheme.accentCyan, fontSize: 13)),
+                    fontWeight: FontWeight.w800, color: Colors.white, fontSize: 13)),
               ]),
             ),
           ),
@@ -901,7 +918,13 @@ class _MatrixScreenState extends State<MatrixScreen>
                   : value.endsWith('teacher') ? ExportType.teacherWise
                   : ExportType.roomWise;
               try {
-                final levelSlots = _level == null ? dataVm.timeSlots.toList() : dataVm.timeSlots.where((t) => t.level == _level).toList();
+                // exportSchedule reads allocVm's own cached assignment list,
+                // not dataVm's — refresh it here so a schedule built by hand
+                // or import (never run through Generate/Fix Now) still
+                // exports instead of hitting "No schedule to export."
+                allocVm.validateAndApply(dataVm.assignments, dataVm.timeSlots,
+                    combinedRules: dataVm.combinedRules, rooms: dataVm.rooms);
+                final levelSlots = dataVm.timeSlots.where((t) => t.level == _level).toList();
                 final savedPath = await allocVm.exportSchedule(
                     format: ExportFormat.excel, type: type, timeSlots: levelSlots,
                     rooms: dataVm.rooms, classes: dataVm.classes, electiveGroups: dataVm.electiveGroups,
@@ -952,20 +975,18 @@ class _MatrixScreenState extends State<MatrixScreen>
               _buildPopupItem(ctx, 'excel_teacher', Icons.table_chart_rounded, 'Excel — Teacher Wise', AppTheme.accentTeal),
               _buildPopupItem(ctx, 'excel_room',    Icons.table_chart_rounded, 'Excel — Room Wise',    AppTheme.accentTeal),
             ],
-            child: AnimatedContainer(
-              duration: const Duration(milliseconds: 200),
+            child: Container(
               padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
               decoration: BoxDecoration(
-                  color: AppTheme.accentTeal.withValues(alpha: .15),
-                  borderRadius: BorderRadius.circular(12),
-                  border: Border.all(color: AppTheme.accentTeal.withValues(alpha: .4))),
+                  color: const Color(0xFF0F766E),
+                  borderRadius: BorderRadius.circular(12)),
               child: Row(children: [
-                const Icon(Icons.download_rounded, color: AppTheme.accentTeal, size: 18),
+                const Icon(Icons.download_rounded, color: Colors.white, size: 18),
                 const SizedBox(width: 8),
                 Text('Export', style: GoogleFonts.plusJakartaSans(
-                    fontWeight: FontWeight.w800, color: AppTheme.accentTeal, fontSize: 13)),
+                    fontWeight: FontWeight.w800, color: Colors.white, fontSize: 13)),
                 const SizedBox(width: 4),
-                const Icon(Icons.arrow_drop_down_rounded, color: AppTheme.accentTeal, size: 18),
+                const Icon(Icons.arrow_drop_down_rounded, color: Colors.white, size: 18),
               ]),
             ),
           ),
@@ -984,7 +1005,7 @@ class _MatrixScreenState extends State<MatrixScreen>
     const cyan   = AppTheme.accentCyan;
 
     EducationLevel? tmpLevel   = _level;
-    String?         tmpClass   = _classFilter;
+    final Set<String> tmpClasses = {..._classFilters};
 
     final allClasses = dataVm.classes.toList()
       ..sort((a, b) => _classChipLabel(dataVm, a).compareTo(_classChipLabel(dataVm, b)));
@@ -996,9 +1017,7 @@ class _MatrixScreenState extends State<MatrixScreen>
       builder: (_) => Align(
         alignment: const Alignment(0.6, -0.72), // near top-right under filter button
         child: StatefulBuilder(builder: (bCtx, setSt) {
-          final visibleClasses = tmpLevel == null
-              ? allClasses
-              : allClasses.where((c) => c.level == tmpLevel).toList();
+          final visibleClasses = allClasses.where((c) => c.level == tmpLevel).toList();
 
           return Material(
             color: Colors.transparent,
@@ -1024,9 +1043,9 @@ class _MatrixScreenState extends State<MatrixScreen>
                     Text('Filter', style: GoogleFonts.plusJakartaSans(
                         fontWeight: FontWeight.w800, fontSize: 14, color: isDark ? Colors.white : const Color(0xFF0F172A))),
                     const Spacer(),
-                    if (tmpLevel != null || tmpClass != null)
+                    if (tmpClasses.isNotEmpty)
                       GestureDetector(
-                        onTap: () { setSt(() { tmpLevel = null; tmpClass = null; }); setState(() { _level = null; _classFilter = null; }); Navigator.pop(bCtx); },
+                        onTap: () { setSt(() => tmpClasses.clear()); setState(() => _classFilters = {}); Navigator.pop(bCtx); },
                         child: Text('Clear', style: GoogleFonts.plusJakartaSans(fontSize: 12, fontWeight: FontWeight.w700, color: blue)),
                       ),
                     const SizedBox(width: 8),
@@ -1037,48 +1056,102 @@ class _MatrixScreenState extends State<MatrixScreen>
                   ]),
                   const SizedBox(height: 12),
 
-                  // ── Level row ─────────────────────────────────────────
+                  // ── Level row — the matrix always shows exactly one
+                  // level; this switches which one, never both at once. ──
                   Text('LEVEL', style: GoogleFonts.plusJakartaSans(fontSize: 9, fontWeight: FontWeight.w800, color: ts, letterSpacing: 1.2)),
                   const SizedBox(height: 6),
                   Row(children: [
-                    _filterChip(bCtx, 'All', tmpLevel == null, blue, isDark, () {
-                      setSt(() { tmpLevel = null; tmpClass = null; });
-                      setState(() { _level = null; _classFilter = null; });
-                    }),
-                    const SizedBox(width: 6),
                     _filterChip(bCtx, 'Intermediate', tmpLevel == EducationLevel.intermediate, blue, isDark, () {
-                      setSt(() { tmpLevel = EducationLevel.intermediate; tmpClass = null; });
-                      setState(() { _level = EducationLevel.intermediate; _classFilter = null; });
+                      setSt(() { tmpLevel = EducationLevel.intermediate; tmpClasses.clear(); });
+                      setState(() { _level = EducationLevel.intermediate; _classFilters = {}; });
                     }),
                     const SizedBox(width: 6),
                     _filterChip(bCtx, 'Bachelors', tmpLevel == EducationLevel.bachelors, cyan, isDark, () {
-                      setSt(() { tmpLevel = EducationLevel.bachelors; tmpClass = null; });
-                      setState(() { _level = EducationLevel.bachelors; _classFilter = null; });
+                      setSt(() { tmpLevel = EducationLevel.bachelors; tmpClasses.clear(); });
+                      setState(() { _level = EducationLevel.bachelors; _classFilters = {}; });
                     }),
                   ]),
                   const SizedBox(height: 12),
 
-                  // ── Class chips ───────────────────────────────────────
-                  Text('CLASS / SECTION', style: GoogleFonts.plusJakartaSans(fontSize: 9, fontWeight: FontWeight.w800, color: ts, letterSpacing: 1.2)),
+                  // ── Class chips — multi-select, grouped by program ─────
+                  Row(children: [
+                    Text('CLASS / SECTION', style: GoogleFonts.plusJakartaSans(fontSize: 9, fontWeight: FontWeight.w800, color: ts, letterSpacing: 1.2)),
+                    if (tmpClasses.isNotEmpty) ...[
+                      const SizedBox(width: 6),
+                      Text('· ${tmpClasses.length} selected', style: GoogleFonts.plusJakartaSans(fontSize: 9, fontWeight: FontWeight.w700, color: blue)),
+                    ],
+                  ]),
                   const SizedBox(height: 6),
                   Flexible(
                     child: SingleChildScrollView(
-                      child: Wrap(
-                        spacing: 6, runSpacing: 6,
-                        children: [
-                          _filterChip(bCtx, 'All Classes', tmpClass == null, blue, isDark, () {
-                            setSt(() => tmpClass = null);
-                            setState(() => _classFilter = null);
-                          }),
-                          ...visibleClasses.map((c) {
-                            final isBach = c.level == EducationLevel.bachelors;
-                            return _filterChip(bCtx, _classChipLabel(dataVm, c), tmpClass == c.id, isBach ? cyan : blue, isDark, () {
-                              setSt(() => tmpClass = c.id);
-                              setState(() => _classFilter = c.id);
-                            });
-                          }),
-                        ],
-                      ),
+                      child: Builder(builder: (_) {
+                        // Group the already program-sorted list into
+                        // {program name -> its classes}, preserving order.
+                        final Map<String, List<ClassModel>> byProgram = {};
+                        for (final c in visibleClasses) {
+                          final progName = dataVm.programs.where((p) => p.id == c.programId).firstOrNull?.name ?? 'Other';
+                          byProgram.putIfAbsent(progName, () => []).add(c);
+                        }
+                        return Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            _filterChip(bCtx, 'All Classes', tmpClasses.isEmpty, blue, isDark, () {
+                              setSt(() => tmpClasses.clear());
+                              setState(() => _classFilters = {});
+                            }),
+                            const SizedBox(height: 10),
+                            ...byProgram.entries.map((entry) {
+                              final progName = entry.key;
+                              final progClasses = entry.value;
+                              final isBach = progClasses.first.level == EducationLevel.bachelors;
+                              final groupColor = isBach ? cyan : blue;
+                              final allIn = progClasses.every((c) => tmpClasses.contains(c.id));
+                              final someIn = !allIn && progClasses.any((c) => tmpClasses.contains(c.id));
+                              void toggleGroup() {
+                                setSt(() {
+                                  if (allIn) {
+                                    for (final c in progClasses) { tmpClasses.remove(c.id); }
+                                  } else {
+                                    for (final c in progClasses) { tmpClasses.add(c.id); }
+                                  }
+                                });
+                                setState(() => _classFilters = {...tmpClasses});
+                              }
+                              return Padding(
+                                padding: const EdgeInsets.only(bottom: 10),
+                                child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                                  GestureDetector(
+                                    onTap: toggleGroup,
+                                    child: Row(mainAxisSize: MainAxisSize.min, children: [
+                                      Icon(
+                                        allIn ? Icons.check_box_rounded
+                                            : someIn ? Icons.indeterminate_check_box_rounded
+                                            : Icons.check_box_outline_blank_rounded,
+                                        size: 15, color: (allIn || someIn) ? groupColor : ts,
+                                      ),
+                                      const SizedBox(width: 5),
+                                      Text(progName, style: GoogleFonts.plusJakartaSans(
+                                          fontSize: 11, fontWeight: FontWeight.w800,
+                                          color: (allIn || someIn) ? groupColor : ts)),
+                                      const SizedBox(width: 4),
+                                      Text('(${progClasses.length})', style: GoogleFonts.plusJakartaSans(fontSize: 10, color: ts)),
+                                    ]),
+                                  ),
+                                  const SizedBox(height: 6),
+                                  Wrap(spacing: 6, runSpacing: 6, children: progClasses.map((c) {
+                                    return _filterChip(bCtx, c.name, tmpClasses.contains(c.id), groupColor, isDark, () {
+                                      setSt(() {
+                                        if (tmpClasses.contains(c.id)) { tmpClasses.remove(c.id); } else { tmpClasses.add(c.id); }
+                                      });
+                                      setState(() => _classFilters = {...tmpClasses});
+                                    });
+                                  }).toList()),
+                                ]),
+                              );
+                            }),
+                          ],
+                        );
+                      }),
                     ),
                   ),
                 ],
@@ -1092,19 +1165,21 @@ class _MatrixScreenState extends State<MatrixScreen>
   }
 
   Widget _filterChip(BuildContext ctx, String label, bool selected, Color color, bool isDark, VoidCallback onTap) {
+    // Solid selected fill (no translucent tint) — reuses the same
+    // pastel-light/deep-dark palette as the matrix grid itself.
+    final pal = _cellPalette(clash: false, elective: false, bach: color == AppTheme.accentCyan, isDark: isDark);
     return GestureDetector(
       onTap: onTap,
       child: AnimatedContainer(
         duration: const Duration(milliseconds: 150),
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
         decoration: BoxDecoration(
-          color: selected ? color.withValues(alpha: .15) : (isDark ? const Color(0xFF0F172A) : const Color(0xFFF1F5F9)),
+          color: selected ? pal.bg : (isDark ? const Color(0xFF0F172A) : const Color(0xFFF1F5F9)),
           borderRadius: BorderRadius.circular(20),
-          border: Border.all(color: selected ? color.withValues(alpha: .6) : Colors.transparent, width: 1.5),
         ),
         child: Text(label, style: GoogleFonts.plusJakartaSans(
             fontSize: 12, fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
-            color: selected ? color : (isDark ? const Color(0xFF94A3B8) : const Color(0xFF475569)))),
+            color: selected ? pal.fg : (isDark ? const Color(0xFF94A3B8) : const Color(0xFF475569)))),
       ),
     );
   }
@@ -1236,12 +1311,10 @@ class _MatrixScreenState extends State<MatrixScreen>
       return lc != 0 ? lc : _parseMin(a.startTime).compareTo(_parseMin(b.startTime));
     });
 
-    // Show ALL configured slots â€” maxPeriods only limits GA engine, not display
-    final bachSlots  = allSlots.where((t) => t.level == EducationLevel.bachelors).toList();
-    final interSlots = allSlots.where((t) => t.level == EducationLevel.intermediate).toList();
-    final singleLevel = _level != null;
-    final filteredSlots = (singleLevel ? allSlots.where((t) => t.level == _level) : allSlots).toList();
-
+    // Show ALL configured slots — maxPeriods only limits GA engine, not display.
+    // The matrix always shows exactly one level (never both at once), so this
+    // is simply that level's slots.
+    final filteredSlots = allSlots.where((t) => t.level == _level).toList();
 
     if (filteredSlots.isEmpty) {
       return _InfoBox(icon: Icons.info_outline_rounded, color: AppTheme.accentCyan,
@@ -1269,7 +1342,7 @@ class _MatrixScreenState extends State<MatrixScreen>
     final Map<String, List<Assignment>> byClass = {};
     for (final a in source.where((x) =>
         (_level == null || x.classModel.level == _level) &&
-        (_classFilter == null || x.classModel.id == _classFilter))) {
+        (_classFilters.isEmpty || _classFilters.contains(x.classModel.id)))) {
       byClass.putIfAbsent(a.classModel.id, () => []).add(a);
     }
 
@@ -1279,7 +1352,7 @@ class _MatrixScreenState extends State<MatrixScreen>
         final cls = classById[cid];
         if (cls != null &&
             (_level == null || cls.level == _level) &&
-            (_classFilter == null || cls.id == _classFilter)) {
+            (_classFilters.isEmpty || _classFilters.contains(cid))) {
           byClass.putIfAbsent(cid, () => []);
         }
       }
@@ -1343,40 +1416,38 @@ class _MatrixScreenState extends State<MatrixScreen>
       // pxPerMin: each minute of real time = this many pixels.
       // 4 px/min Ã¢â€ â€™ 60 min(bach) = 240px, 40 min(inter) = 160px
       // 2 bach (120min=480px) == 3 inter (120min=480px) Ã¢â€ â€™ perfect alignment.
-      const double pxPerMin = 4.0;
+      // Fixed, compact columns for this ONE level — every period fits on
+      // screen without a horizontal scroll (no more time-proportional
+      // widths pushing an evening-shift class's P4-P6 off to the right).
+      final EducationLevel currentLevel = _level ?? EducationLevel.bachelors;
+      final double colW = _fixedColW(avail, rowLblW, filteredSlots.length);
 
       int parseMin(String t) => _parseMin(t);
-
-      // Global time bounds (union of both levels)
-      final allStarts = filteredSlots.map((t) => parseMin(t.startTime));
-      final allEnds   = filteredSlots.map((t) => parseMin(t.endTime));
-      final globalStart = allStarts.reduce((a, b) => a < b ? a : b);
-      final globalEnd   = allEnds.reduce((a, b) => a > b ? a : b);
-
-      // Width of a slot in pixels
-      double slotW(ts) => math.max(0.0, (parseMin(ts.endTime) - parseMin(ts.startTime)) * pxPerMin);
-      // Leading gap of a slot from globalStart
-      double slotOffset(ts) => math.max(0.0, (parseMin(ts.startTime) - globalStart) * pxPerMin);
-      // Total timeline width (excluding label column)
-      final timelineW = math.max(0.0, (globalEnd - globalStart) * pxPerMin);
+      const int eveningBoundaryMin = 11 * 60; // 11:00 AM — see ShiftRule
 
       // ── period header cell (proportional width) ──────────────────────────
       // Shared period header — used by both class-wise and teacher-wise
       Widget periodHeader(ts, Color accent) {
-        final w = slotW(ts);
-        return SizedBox(width: w, child: Padding(
+        final isEveningStart = currentLevel == EducationLevel.bachelors &&
+            parseMin(ts.startTime) >= eveningBoundaryMin;
+        return Container(
+          width: colW,
+          decoration: isEveningStart
+              ? const BoxDecoration(border: Border(left: BorderSide(color: Color(0xFFC2410C), width: 2)))
+              : null,
+          child: Padding(
           padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 2),
           child: Column(mainAxisSize: MainAxisSize.min, children: [
             Text(ts.shortLabel, style: GoogleFonts.plusJakartaSans(
-                fontWeight: FontWeight.w700, fontSize: 10, color: accent),
+                fontWeight: FontWeight.w700, fontSize: 11, color: isEveningStart ? const Color(0xFFC2410C) : accent),
                 textAlign: TextAlign.center),
-            Text('${ts.startTime}-${ts.endTime}', style: GoogleFonts.plusJakartaSans(
-                fontSize: 7, color: ctx._tm), textAlign: TextAlign.center),
+            Text('${TimeSlot.format12(ts.startTime)}-${TimeSlot.format12(ts.endTime)}', style: GoogleFonts.plusJakartaSans(
+                fontSize: 8.5, color: ctx._tm), textAlign: TextAlign.center),
             if (ts.hasFridayOverride)
               Text('Fri ${ts.fridayLabel}', style: GoogleFonts.plusJakartaSans(
-                  fontSize: 7, color: AppTheme.accentAmber), textAlign: TextAlign.center),
+                  fontSize: 8, color: AppTheme.accentAmber), textAlign: TextAlign.center),
               if (settingsVm.fridayShortDay && ts.period > settingsVm.fridayMaxPeriod)
-                Container(margin: const EdgeInsets.only(top: 2), padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1), decoration: BoxDecoration(color: const Color(0xFFEF4444).withValues(alpha: .12), borderRadius: BorderRadius.circular(4)), child: Text('Fri off', style: GoogleFonts.plusJakartaSans(fontSize: 6, fontWeight: FontWeight.w800, color: const Color(0xFFEF4444)))), 
+                Container(margin: const EdgeInsets.only(top: 2), padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1), decoration: BoxDecoration(color: const Color(0xFFEF4444).withValues(alpha: .12), borderRadius: BorderRadius.circular(4)), child: Text('Fri off', style: GoogleFonts.plusJakartaSans(fontSize: 7, fontWeight: FontWeight.w800, color: const Color(0xFFEF4444)))),
           ]),
         ));
       }
@@ -1385,12 +1456,17 @@ class _MatrixScreenState extends State<MatrixScreen>
       // [aList] = all assignments for this class at this time slot
       // [eg]    = optional ElectiveGroup covering this class at this slot.
       Widget assignCell(ts, List<Assignment> aList, {ElectiveGroup? eg, bool samePrev = false, bool sameNext = false, int span = 1, int indexInGroup = 0}) {
-        final w = slotW(ts);
+        final w = colW;
 
         // ── Elective group cell ───────────────────────────────────────────────
         if (eg != null) {
           final bool groupHasClash = eg.entries.any((e) => clashingElectiveEntryIds.contains(e.id));
-          final col = groupHasClash ? AppTheme.error : AppTheme.accentAmber;
+          // A shade behind the individually-colored entry chips so the group
+          // reads as one block without stacking translucency — darker than
+          // the entries in dark mode, a touch deeper pastel in light mode.
+          final containerCol = ctx._dk
+              ? (groupHasClash ? const Color(0xFF7F1D1D) : const Color(0xFF78350F))
+              : (groupHasClash ? const Color(0xFFFECACA) : const Color(0xFFFDE68A));
           final int N = eg.entries.length;
 
           List<int> startIndex = List.filled(span, 0);
@@ -1425,18 +1501,12 @@ class _MatrixScreenState extends State<MatrixScreen>
               ),
               padding: const EdgeInsets.all(5),
               decoration: BoxDecoration(
-                color: col.withValues(alpha: .08),
+                color: containerCol,
                 borderRadius: BorderRadius.only(
                   topLeft:     isFirst ? const Radius.circular(9) : Radius.zero,
                   topRight:    isFirst ? const Radius.circular(9) : Radius.zero,
                   bottomLeft:  isLast  ? const Radius.circular(9) : Radius.zero,
                   bottomRight: isLast  ? const Radius.circular(9) : Radius.zero,
-                ),
-                border: Border(
-                  left:   BorderSide(color: col.withValues(alpha: .45), width: 1),
-                  right:  BorderSide(color: col.withValues(alpha: .45), width: 1),
-                  top:    isFirst ? BorderSide(color: col.withValues(alpha: .45), width: 1) : BorderSide.none,
-                  bottom: isLast  ? BorderSide(color: col.withValues(alpha: .45), width: 1) : BorderSide.none,
                 ),
               ),
               child: Column(
@@ -1451,15 +1521,14 @@ class _MatrixScreenState extends State<MatrixScreen>
                       final isEntryClash = clashingElectiveEntryIds.contains(e.id);
                       // Only the actually-clashing entry renders red — a sibling
                       // clash elsewhere in the group shouldn't paint every card.
-                      final cardCol = isEntryClash ? AppTheme.error : AppTheme.accentAmber;
+                      final pal = _cellPalette(clash: isEntryClash, elective: !isEntryClash, bach: false, isDark: ctx._dk);
                       final hasRoom = e.roomLabel != null && e.roomLabel!.isNotEmpty;
                       return Container(
                         width: double.infinity,
                         padding: const EdgeInsets.all(6),
                         decoration: BoxDecoration(
-                          color: cardCol.withValues(alpha: isEntryClash ? .15 : .10),
-                          borderRadius: BorderRadius.circular(9),
-                          border: Border.all(color: cardCol.withValues(alpha: isEntryClash ? .7 : .3), width: isEntryClash ? 1.5 : 1),
+                          color: pal.bg,
+                          borderRadius: BorderRadius.circular(8),
                         ),
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
@@ -1467,25 +1536,25 @@ class _MatrixScreenState extends State<MatrixScreen>
                           children: [
                             Row(children: [
                               if (isEntryClash) ...[
-                                Icon(Icons.warning_rounded, size: 9, color: cardCol),
+                                Icon(Icons.warning_rounded, size: 10, color: pal.fg),
                                 const SizedBox(width: 3),
                               ],
                               Expanded(child: Text(e.courseName, style: GoogleFonts.plusJakartaSans(
-                                  fontWeight: FontWeight.w800, fontSize: 10, color: cardCol),
+                                  fontWeight: FontWeight.w800, fontSize: 11, color: pal.fg),
                                   overflow: TextOverflow.ellipsis, maxLines: 1)),
                             ]),
                             const SizedBox(height: 2),
                             Text(e.teacherName, style: GoogleFonts.plusJakartaSans(
-                                fontSize: 8, color: isEntryClash ? cardCol.withValues(alpha: .8) : ctx._ts),
+                                fontSize: 9, color: pal.fgSoft),
                                 overflow: TextOverflow.ellipsis),
                             if (hasRoom) ...[
                               const SizedBox(height: 1),
                               Row(children: [
-                                Icon(Icons.meeting_room_rounded, size: 8, color: cardCol),
+                                Icon(Icons.meeting_room_rounded, size: 9, color: pal.fgSoft),
                                 const SizedBox(width: 2),
                                 Expanded(
                                   child: Text(e.roomLabel!, style: GoogleFonts.plusJakartaSans(
-                                      fontSize: 8, fontWeight: FontWeight.w700, color: cardCol),
+                                      fontSize: 9, fontWeight: FontWeight.w700, color: pal.fgSoft),
                                       overflow: TextOverflow.ellipsis, maxLines: 1),
                                 ),
                               ]),
@@ -1531,32 +1600,31 @@ class _MatrixScreenState extends State<MatrixScreen>
           for (final a in aList) { grpd.putIfAbsent('${a.course.id}__${a.teacher.id}', () => []).add(a); }
           final List<Widget> clashCards = grpd.values.map((group) {
             final a = group.first;
-            final errCol = AppTheme.error;
+            final pal = _cellPalette(clash: true, elective: false, bach: false, isDark: ctx._dk);
             final allDays = group.expand((x) => x.occupiedSlots).toSet().toList()..sort();
             return Container(
               margin: const EdgeInsets.only(left: 2, right: 2, bottom: 3),
               padding: const EdgeInsets.all(6),
               decoration: BoxDecoration(
-                color: errCol.withValues(alpha: .15),
-                borderRadius: BorderRadius.circular(9),
-                border: Border.all(color: errCol.withValues(alpha: .7), width: 1.5),
+                color: pal.bg,
+                borderRadius: BorderRadius.circular(8),
               ),
               child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
                 Row(children: [
-                  Icon(Icons.warning_rounded, size: 9, color: errCol),
+                  Icon(Icons.warning_rounded, size: 10, color: pal.fg),
                   const SizedBox(width: 3),
                   Expanded(child: Text(a.course.name, style: GoogleFonts.plusJakartaSans(
-                      fontWeight: FontWeight.w800, color: errCol, fontSize: 10),
+                      fontWeight: FontWeight.w800, color: pal.fg, fontSize: 11),
                       overflow: TextOverflow.ellipsis, maxLines: 1)),
                 ]),
                 const SizedBox(height: 2),
                 Text(a.teacher.name, style: GoogleFonts.plusJakartaSans(
-                    fontSize: 8, color: errCol.withValues(alpha: .8)), overflow: TextOverflow.ellipsis, maxLines: 1),
+                    fontSize: 9, color: pal.fgSoft), overflow: TextOverflow.ellipsis, maxLines: 1),
                 if (formatDaysLabel(allDays) != null) Row(children: [
-                  Icon(Icons.calendar_today_rounded, size: 7, color: ctx._tm),
+                  Icon(Icons.calendar_today_rounded, size: 8, color: pal.fgSoft),
                   const SizedBox(width: 2),
                   Flexible(child: Text('Days: ${formatDaysLabel(allDays)}', style: GoogleFonts.plusJakartaSans(
-                      fontSize: 8, fontWeight: FontWeight.w700, color: ctx._tm),
+                      fontSize: 9, fontWeight: FontWeight.w700, color: pal.fgSoft),
                       overflow: TextOverflow.ellipsis, maxLines: 1)),
                 ]),
               ]),
@@ -1570,18 +1638,13 @@ class _MatrixScreenState extends State<MatrixScreen>
               electiveWidget,
               Container(
                 margin: const EdgeInsets.symmetric(horizontal: 2),
-                padding: const EdgeInsets.symmetric(vertical: 2),
-                decoration: BoxDecoration(
-                  color: AppTheme.error.withValues(alpha: .12),
-                  border: Border.symmetric(
-                    horizontal: BorderSide(color: AppTheme.error.withValues(alpha: .5), width: 1),
-                  ),
-                ),
+                padding: const EdgeInsets.symmetric(vertical: 3),
+                decoration: const BoxDecoration(color: Color(0xFFB91C1C)),
                 child: Row(mainAxisAlignment: MainAxisAlignment.center, children: [
-                  Icon(Icons.warning_amber_rounded, size: 9, color: AppTheme.error),
+                  const Icon(Icons.warning_amber_rounded, size: 10, color: Colors.white),
                   const SizedBox(width: 3),
                   Text('CLASH', style: GoogleFonts.plusJakartaSans(
-                      fontSize: 8, fontWeight: FontWeight.w900, color: AppTheme.error)),
+                      fontSize: 9, fontWeight: FontWeight.w900, color: Colors.white)),
                 ]),
               ),
               ...clashCards,
@@ -1608,44 +1671,40 @@ class _MatrixScreenState extends State<MatrixScreen>
             children: grouped.values.map((group) {
               final a   = group.first;
               final isClash = group.any((x) => clashingAssignmentIds.contains(x.id));
-              final col = isClash ? AppTheme.error
-                  : a.classModel.level == EducationLevel.bachelors
-                      ? AppTheme.accentCyan : AppTheme.accentBlue;
+              final pal = _cellPalette(clash: isClash, elective: false,
+                  bach: a.classModel.level == EducationLevel.bachelors, isDark: ctx._dk);
               final allDays = group.expand((x) => x.occupiedSlots).toSet().toList()..sort();
               return Container(
                 margin: const EdgeInsets.all(3),
                 padding: const EdgeInsets.all(6),
-                decoration: BoxDecoration(
-                    color: col.withValues(alpha: isClash ? .15 : .1),
-                    borderRadius: BorderRadius.circular(9),
-                    border: Border.all(color: col.withValues(alpha: isClash ? .7 : .3), width: isClash ? 1.5 : 1)),
+                decoration: BoxDecoration(color: pal.bg, borderRadius: BorderRadius.circular(8)),
                 child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
                   Row(children: [
                     if (isClash) ...[
-                      Icon(Icons.warning_rounded, size: 9, color: col),
+                      Icon(Icons.warning_rounded, size: 10, color: pal.fg),
                       const SizedBox(width: 3),
                     ],
                     Expanded(child: Text(a.course.name, style: GoogleFonts.plusJakartaSans(
-                        fontWeight: FontWeight.w800, color: col, fontSize: 10),
+                        fontWeight: FontWeight.w800, color: pal.fg, fontSize: 11),
                         overflow: TextOverflow.ellipsis, maxLines: 1)),
                   ]),
                   const SizedBox(height: 2),
                   Text(a.teacher.name, style: GoogleFonts.plusJakartaSans(
-                      fontSize: 8, color: ctx._ts), overflow: TextOverflow.ellipsis, maxLines: 1),
+                      fontSize: 9, color: pal.fgSoft), overflow: TextOverflow.ellipsis, maxLines: 1),
                   if (formatDaysLabel(allDays) != null) Row(children: [
-                    Icon(Icons.calendar_today_rounded, size: 7, color: ctx._tm),
+                    Icon(Icons.calendar_today_rounded, size: 8, color: pal.fgSoft),
                     const SizedBox(width: 2),
                     Flexible(child: Text('Days: ${formatDaysLabel(allDays)}', style: GoogleFonts.plusJakartaSans(
-                        fontSize: 8, fontWeight: FontWeight.w700, color: ctx._tm),
+                        fontSize: 9, fontWeight: FontWeight.w700, color: pal.fgSoft),
                         overflow: TextOverflow.ellipsis, maxLines: 1)),
                   ]),
                   if (a.hasRoom) ...[
                     const SizedBox(height: 1),
                     Row(children: [
-                      Icon(Icons.meeting_room_rounded, size: 7, color: ctx._tm),
+                      Icon(Icons.meeting_room_rounded, size: 8, color: pal.fgSoft),
                       const SizedBox(width: 2),
                       Flexible(child: Text(roomById[a.roomId] ?? 'Unknown', style: GoogleFonts.plusJakartaSans(
-                          fontSize: 8, fontWeight: FontWeight.w700, color: ctx._tm),
+                          fontSize: 9, fontWeight: FontWeight.w700, color: pal.fgSoft),
                           overflow: TextOverflow.ellipsis, maxLines: 1)),
                     ]),
                   ],
@@ -1658,19 +1717,12 @@ class _MatrixScreenState extends State<MatrixScreen>
       // ── Build a timeline row: label + slots positioned on global time axis ──
       Widget timelineRow(List slots, Map<String, List<Assignment>> pMap,
           {required bool showSlots, Map<String, ElectiveGroup>? egMap, Map<String, Map<String, dynamic>>? mergeMap}) {
-        if (slots.isEmpty) return SizedBox(width: timelineW);
-        final lead  = slotOffset(slots.first);
-        final trail = timelineW - lead - slots.fold(0.0, (s, t) => s + slotW(t));
-        return SizedBox(
-          width: timelineW,
-          child: Row(mainAxisSize: MainAxisSize.min, crossAxisAlignment: showSlots ? CrossAxisAlignment.stretch : CrossAxisAlignment.start, children: [
-            if (lead > 0)   SizedBox(width: lead, child: showSlots ? Container(decoration: BoxDecoration(border: Border(bottom: BorderSide(color: ctx._dv, width: 1)))) : null),
-            ...slots.map((ts) => showSlots
-                ? assignCell(ts, pMap[ts.id] ?? [], eg: egMap?[ts.id], samePrev: mergeMap?[ts.id]?['prev'] ?? false, sameNext: mergeMap?[ts.id]?['next'] ?? false, span: mergeMap?[ts.id]?['span'] ?? 1, indexInGroup: mergeMap?[ts.id]?['indexInGroup'] ?? 0)
-                : periodHeader(ts, ts.level == EducationLevel.bachelors ? AppTheme.accentCyan : AppTheme.accentBlue)),
-            if (trail > 0)  SizedBox(width: trail, child: showSlots ? Container(decoration: BoxDecoration(border: Border(bottom: BorderSide(color: ctx._dv, width: 1)))) : null),
-          ]),
-        );
+        if (slots.isEmpty) return SizedBox(width: colW * filteredSlots.length);
+        return Row(mainAxisSize: MainAxisSize.min, crossAxisAlignment: showSlots ? CrossAxisAlignment.stretch : CrossAxisAlignment.start, children: [
+          ...slots.map((ts) => showSlots
+              ? assignCell(ts, pMap[ts.id] ?? [], eg: egMap?[ts.id], samePrev: mergeMap?[ts.id]?['prev'] ?? false, sameNext: mergeMap?[ts.id]?['next'] ?? false, span: mergeMap?[ts.id]?['span'] ?? 1, indexInGroup: mergeMap?[ts.id]?['indexInGroup'] ?? 0)
+              : periodHeader(ts, ts.level == EducationLevel.bachelors ? AppTheme.accentCyan : AppTheme.accentBlue)),
+        ]);
       }
 
       // ── label cell ──────────────────────────────────────────────────────────────────
@@ -1681,6 +1733,7 @@ class _MatrixScreenState extends State<MatrixScreen>
         if (classModel == null) return SizedBox(width: rowLblW);
         final programName = progById[classModel.programId] ?? '';
         final isBach     = classModel.level == EducationLevel.bachelors;
+        final shift      = isBach ? dataVm.shiftForClass(classModel.id) : null;
         return Container(
             width: rowLblW,
             decoration: BoxDecoration(border: Border(bottom: BorderSide(color: ctx._dv, width: 1))),
@@ -1692,19 +1745,26 @@ class _MatrixScreenState extends State<MatrixScreen>
                     color: isBach ? AppTheme.accentCyan : AppTheme.accentBlue,
                     fontSize: 10), overflow: TextOverflow.ellipsis, maxLines: 1),
               Text(classModel.name, style: GoogleFonts.plusJakartaSans(
-                  fontWeight: FontWeight.w700, color: ctx._tp, fontSize: 11),
+                  fontWeight: FontWeight.w700, color: ctx._tp, fontSize: 12.5),
                   overflow: TextOverflow.ellipsis),
-              Row(children: [
-                Text('${asgns.length} subj', style: GoogleFonts.plusJakartaSans(
-                    fontSize: 9, color: ctx._tm)),
-
-              ]),
+              Text('${asgns.length} subj', style: GoogleFonts.plusJakartaSans(
+                  fontSize: 9.5, color: ctx._tm)),
+              if (shift != null) Container(
+                margin: const EdgeInsets.only(top: 5),
+                padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
+                decoration: BoxDecoration(
+                    color: shift == ShiftType.evening ? const Color(0xFFC2410C) : const Color(0xFF334155),
+                    borderRadius: BorderRadius.circular(5)),
+                child: Text(shift == ShiftType.evening ? 'EVENING' : 'MORNING',
+                    style: GoogleFonts.plusJakartaSans(
+                        fontSize: 8.5, fontWeight: FontWeight.w800, color: Colors.white)),
+              ),
             ]));
       }
 
       // Explicit total row width — avoids IntrinsicWidth's O(n) measurement
       // that broke alignment at 100+ rows. Every row now gets exact pixels.
-      final totalW = rowLblW + timelineW;
+      final totalW = rowLblW + colW * filteredSlots.length;
 
       return Container(
         decoration: ctx.glassC(r: 20),
@@ -1718,33 +1778,23 @@ class _MatrixScreenState extends State<MatrixScreen>
                 mainAxisSize: MainAxisSize.min,
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  // ── HEADERS ──────────────────────────────────────────────────
-                  if (singleLevel) ...[
-                    Container(color: ctx._hd, child: Row(children: [
-                      SizedBox(width: rowLblW, child: Padding(
-                          padding: const EdgeInsets.all(12),
-                          child: Text('Class', style: GoogleFonts.plusJakartaSans(
-                              fontWeight: FontWeight.w700, fontSize: 11, color: ctx._ts)))),
-                      timelineRow(filteredSlots, {}, showSlots: false),
-                    ])),
-                  ] else ...[
-                    if (bachSlots.isNotEmpty)
-                      Container(color: AppTheme.accentCyan.withValues(alpha: .07), child: Row(children: [
-                        SizedBox(width: rowLblW, child: Padding(
-                            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                            child: Text('Bach', style: GoogleFonts.plusJakartaSans(
-                                fontWeight: FontWeight.w800, fontSize: 10, color: AppTheme.accentCyan)))),
-                        timelineRow(bachSlots, {}, showSlots: false),
-                      ])),
-                    if (interSlots.isNotEmpty)
-                      Container(color: AppTheme.accentBlue.withValues(alpha: .07), child: Row(children: [
-                        SizedBox(width: rowLblW, child: Padding(
-                            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                            child: Text('Inter', style: GoogleFonts.plusJakartaSans(
-                                fontWeight: FontWeight.w800, fontSize: 10, color: AppTheme.accentBlue)))),
-                        timelineRow(interSlots, {}, showSlots: false),
-                      ])),
-                  ],
+                  // ── HEADER — one level only, so one header row ──────────────
+                  Container(color: ctx._hd, child: Row(children: [
+                    SizedBox(width: rowLblW, child: Padding(
+                        padding: const EdgeInsets.all(12),
+                        child: Text('Class', style: GoogleFonts.plusJakartaSans(
+                            fontWeight: FontWeight.w700, fontSize: 11, color: ctx._ts)))),
+                    timelineRow(filteredSlots, {}, showSlots: false),
+                  ])),
+                  if (currentLevel == EducationLevel.bachelors &&
+                      filteredSlots.any((ts) => parseMin(ts.startTime) >= eveningBoundaryMin))
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+                      color: const Color(0xFFC2410C).withValues(alpha: .08),
+                      child: Text('morning shift  ·  evening shift begins at the orange line',
+                          style: GoogleFonts.plusJakartaSans(
+                              fontSize: 9.5, fontWeight: FontWeight.w700, color: const Color(0xFFC2410C))),
+                    ),
                   Divider(color: ctx._dv, height: 1),
 
                   // ── DATA ROWS ─────────────────────────────────────────────────
@@ -1752,13 +1802,10 @@ class _MatrixScreenState extends State<MatrixScreen>
                     final cIdx    = entry.key;
                     final classId = entry.value;
                     final asgns   = byClass[classId] ?? [];
-                    final rowClassModel = asgns.isNotEmpty ? asgns.first.classModel : classById[classId];
-                    final isBach  = rowClassModel?.level == EducationLevel.bachelors;
                     final Map<String, List<Assignment>> pMap = {};
                     for (final a in asgns) { pMap.putIfAbsent(a.timeSlotId, () => []).add(a); }
 
-                    final slots = singleLevel ? filteredSlots
-                        : (isBach ? bachSlots : interSlots);
+                    final slots = filteredSlots;
 
                     final Map<String, ElectiveGroup> egMap = {};
                     final Map<String, Map<String, dynamic>> mergeMap = {};
@@ -1831,12 +1878,8 @@ class _MatrixScreenState extends State<MatrixScreen>
       // later column silently renders at the wrong clock position.
       return lc != 0 ? lc : _parseMin(a.startTime).compareTo(_parseMin(b.startTime));
     });
-    // Show ALL configured slots
-    final bachSlots  = allSlots.where((t) => t.level == EducationLevel.bachelors).toList();
-    final interSlots = allSlots.where((t) => t.level == EducationLevel.intermediate).toList();
-    final singleLevel = _level != null;
-    final filteredSlots = (singleLevel ? allSlots.where((t) => t.level == _level) : allSlots).toList();
-
+    // Show ALL configured slots — this ONE level's, never both at once.
+    final filteredSlots = allSlots.where((t) => t.level == _level).toList();
 
     if (filteredSlots.isEmpty) {
       return _InfoBox(icon: Icons.info_outline_rounded, color: AppTheme.accentCyan,
@@ -1851,7 +1894,7 @@ class _MatrixScreenState extends State<MatrixScreen>
     for (final a in source.where((x) =>
         x.hasRoom &&
         roomById.containsKey(x.roomId) &&
-        (_level == null || x.classModel.level == _level))) {
+        x.classModel.level == _level)) {
       final roomId = a.roomId!;
       final slotId = a.timeSlotId;
       if (a.id.startsWith('elec_')) {
@@ -1908,13 +1951,11 @@ class _MatrixScreenState extends State<MatrixScreen>
         final shared = a.occupiedSlots.toSet().intersection(b.occupiedSlots.toSet());
         if (shared.isEmpty) continue;
 
-        // Ignore legitimate combined courses
-        if (a.course.id == b.course.id) {
-          final isCombined = dataVm.combinedRules.any((r) => 
-              r.courseId == a.course.id &&
-              r.classIds.contains(a.classModel.id) &&
-              r.classIds.contains(b.classModel.id));
-          if (isCombined) continue;
+        // Ignore legitimate combined courses — directly or transitively
+        // combined through a shared class.
+        if (a.course.id == b.course.id &&
+            combinedRulesLinkClasses(dataVm.combinedRules, a.course.id, a.classModel.id, b.classModel.id)) {
+          continue;
         }
 
         // Ignore if either assignment's class is in an elective group at that slot
@@ -1947,36 +1988,39 @@ class _MatrixScreenState extends State<MatrixScreen>
     return LayoutBuilder(builder: (ctx2, constraints) {
       final avail   = constraints.maxWidth;
       final rowLblW = avail < 420 ? 100.0 : avail < 600 ? 130.0 : 190.0;
-      const double pxPerMin = 4.0;
-
+      final EducationLevel currentLevel = _level ?? EducationLevel.bachelors;
+      final double colW = _fixedColW(avail, rowLblW, filteredSlots.length);
       int parseMin(String t) => _parseMin(t);
-      final allStarts = filteredSlots.map((t) => parseMin(t.startTime));
-      final allEnds   = filteredSlots.map((t) => parseMin(t.endTime));
-      final globalStart = allStarts.reduce((a, b) => a < b ? a : b);
-      final globalEnd   = allEnds.reduce((a, b) => a > b ? a : b);
-      double slotW(ts)      => math.max(0.0, (parseMin(ts.endTime) - parseMin(ts.startTime)) * pxPerMin);
-      double slotOffset(ts) => math.max(0.0, (parseMin(ts.startTime) - globalStart) * pxPerMin);
-      final timelineW       = math.max(0.0, (globalEnd - globalStart) * pxPerMin);
+      const int eveningBoundaryMin = 11 * 60; // 11:00 AM — see ShiftRule
 
       // Ã¢â€â‚¬Ã¢â€â‚¬ period header cell Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
-      Widget periodHeader(ts, Color accent) => SizedBox(width: slotW(ts), child: Padding(
+      Widget periodHeader(ts, Color accent) {
+        final isEveningStart = currentLevel == EducationLevel.bachelors &&
+            parseMin(ts.startTime) >= eveningBoundaryMin;
+        return Container(
+          width: colW,
+          decoration: isEveningStart
+              ? const BoxDecoration(border: Border(left: BorderSide(color: Color(0xFFC2410C), width: 2)))
+              : null,
+          child: Padding(
         padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 2),
         child: Column(mainAxisSize: MainAxisSize.min, children: [
           Text(ts.shortLabel, style: GoogleFonts.plusJakartaSans(
-              fontWeight: FontWeight.w700, fontSize: 10, color: accent),
+              fontWeight: FontWeight.w700, fontSize: 11, color: isEveningStart ? const Color(0xFFC2410C) : accent),
               textAlign: TextAlign.center),
-          Text('${ts.startTime}-${ts.endTime}', style: GoogleFonts.plusJakartaSans(
-              fontSize: 7, color: ctx._tm), textAlign: TextAlign.center),
+          Text('${TimeSlot.format12(ts.startTime)}-${TimeSlot.format12(ts.endTime)}', style: GoogleFonts.plusJakartaSans(
+              fontSize: 8.5, color: ctx._tm), textAlign: TextAlign.center),
           if (ts.hasFridayOverride)
             Text('Fri ${ts.fridayLabel}', style: GoogleFonts.plusJakartaSans(
-                fontSize: 7, color: AppTheme.accentAmber), textAlign: TextAlign.center),
+                fontSize: 8, color: AppTheme.accentAmber), textAlign: TextAlign.center),
           if (settingsVm.fridayShortDay && ts.period > settingsVm.fridayMaxPeriod)
-            Container(margin: const EdgeInsets.only(top: 2), padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1), decoration: BoxDecoration(color: const Color(0xFFEF4444).withValues(alpha: .12), borderRadius: BorderRadius.circular(4)), child: Text('Fri off', style: GoogleFonts.plusJakartaSans(fontSize: 6, fontWeight: FontWeight.w800, color: const Color(0xFFEF4444)))),
+            Container(margin: const EdgeInsets.only(top: 2), padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1), decoration: BoxDecoration(color: const Color(0xFFEF4444).withValues(alpha: .12), borderRadius: BorderRadius.circular(4)), child: Text('Fri off', style: GoogleFonts.plusJakartaSans(fontSize: 7, fontWeight: FontWeight.w800, color: const Color(0xFFEF4444)))),
         ]),
       ));
+      }
       // Ã¢â€â‚¬Ã¢â€â‚¬ assignment cell for teacher view Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
       Widget rCell(ts, List<Assignment> aList, {bool clashing = false}) {
-        final w = slotW(ts);
+        final w = colW;
         if (aList.isEmpty) {
           return SizedBox(width: w, height: 72,
               child: Center(child: Text('-', style: TextStyle(
@@ -1999,86 +2043,70 @@ class _MatrixScreenState extends State<MatrixScreen>
             final isBach     = a.classModel.level == EducationLevel.bachelors;
             final isElective = a.id.startsWith('elec_');
             final effectiveClash = clashing;
-            final col      = effectiveClash ? AppTheme.error
-                : isElective ? AppTheme.accentAmber
-                : (isBach ? AppTheme.accentCyan : AppTheme.accentBlue);
+            final pal = _cellPalette(clash: effectiveClash, elective: !effectiveClash && isElective, bach: isBach, isDark: ctx._dk);
             final allDays  = group.expand((x) => x.occupiedSlots).toSet().toList()..sort();
             return Container(
               margin: const EdgeInsets.all(3),
               padding: const EdgeInsets.all(6),
-              decoration: BoxDecoration(
-                  color: col.withValues(alpha: effectiveClash ? .15 : .1),
-                  borderRadius: BorderRadius.circular(9),
-                  border: Border.all(color: col.withValues(alpha: effectiveClash ? .7 : .3),
-                      width: effectiveClash ? 1.5 : 1)),
+              decoration: BoxDecoration(color: pal.bg, borderRadius: BorderRadius.circular(8)),
               child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
                 // Course name row — with clash icon if clashing
                 if (effectiveClash) Row(children: [
-                  Icon(Icons.warning_amber_rounded, color: col, size: 9),
+                  Icon(Icons.warning_amber_rounded, color: pal.fg, size: 10),
                   const SizedBox(width: 2),
                   Expanded(child: Text(a.course.name, style: GoogleFonts.plusJakartaSans(
-                      fontWeight: FontWeight.w800, color: col, fontSize: 10),
+                      fontWeight: FontWeight.w800, color: pal.fg, fontSize: 11),
                       overflow: TextOverflow.ellipsis, maxLines: 1)),
                 ]) else Text(a.course.name, style: GoogleFonts.plusJakartaSans(
-                    fontWeight: FontWeight.w800, color: col, fontSize: 10),
+                    fontWeight: FontWeight.w800, color: pal.fg, fontSize: 11),
                     overflow: TextOverflow.ellipsis, maxLines: 1),
                 const SizedBox(height: 2),
                 // Secondary info: class names (electives list all attending classes)
                 Builder(builder: (_) {
-                  String teachers = group.map((x) => x.teacher.name).toSet().join(', ');
-                  String label = teachers;
-                  if (isElective) {
-                    label = teachers;
-                  }
-                  return Text(label, style: GoogleFonts.plusJakartaSans(
-                      fontSize: 8, color: isElective ? AppTheme.accentAmber : ctx._ts,
+                  final teachers = group.map((x) => x.teacher.name).toSet().join(', ');
+                  return Text(teachers, style: GoogleFonts.plusJakartaSans(
+                      fontSize: 9, color: pal.fgSoft,
                       fontWeight: isElective ? FontWeight.w700 : FontWeight.w400),
                       overflow: TextOverflow.ellipsis, maxLines: 2);
                 }),
                 // Days row — same icon + format as class-wise
                 if (formatDaysLabel(allDays) != null) Row(children: [
                   Icon(Icons.calendar_today_rounded,
-                      size: 7, color: effectiveClash ? col : ctx._tm),
+                      size: 8, color: pal.fgSoft),
                   const SizedBox(width: 2),
                   Flexible(child: Text('Days: ${formatDaysLabel(allDays)}',
                       style: GoogleFonts.plusJakartaSans(
-                          fontSize: 8, fontWeight: FontWeight.w700,
-                          color: effectiveClash ? col : ctx._tm),
+                          fontSize: 9, fontWeight: FontWeight.w700,
+                          color: pal.fgSoft),
                       overflow: TextOverflow.ellipsis, maxLines: 1)),
                 ]),
-                if (true) ...[
-                  Builder(builder: (_) {
-                    String classes = group.map((x) => x.classModel.shortCode).toSet().join(', ');
-                    if (isElective) {
-                      final parts = a.id.split('_');
-                      if (parts.length >= 3) {
-                        final egId = parts[1];
-                        final eg = dataVm.electiveGroups.where((g) => g.id == egId).firstOrNull;
-                        if (eg != null) {
-                          classes = eg.classIds
-                              .map((cid) => dataVm.classes.where((c) => c.id == cid).firstOrNull?.shortCode ?? '?')
-                              .join(', ');
-                        }
+                Builder(builder: (_) {
+                  String classes = group.map((x) => x.classModel.shortCode).toSet().join(', ');
+                  if (isElective) {
+                    final parts = a.id.split('_');
+                    if (parts.length >= 3) {
+                      final egId = parts[1];
+                      final eg = dataVm.electiveGroups.where((g) => g.id == egId).firstOrNull;
+                      if (eg != null) {
+                        classes = eg.classIds
+                            .map((cid) => dataVm.classes.where((c) => c.id == cid).firstOrNull?.shortCode ?? '?')
+                            .join(', ');
                       }
                     }
-                    return Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        const SizedBox(height: 1),
-                        Row(children: [
-                          Icon(Icons.group_rounded,
-                              size: 7, color: effectiveClash ? col : ctx._tm),
-                          const SizedBox(width: 2),
-                          Flexible(child: Text(classes,
-                              style: GoogleFonts.plusJakartaSans(
-                                  fontSize: 8, fontWeight: FontWeight.w700,
-                                  color: effectiveClash ? col : ctx._tm),
-                              overflow: TextOverflow.ellipsis, maxLines: 1)),
-                        ]),
-                      ]
-                    );
-                  }),
-                ],
+                  }
+                  return Padding(
+                    padding: const EdgeInsets.only(top: 1),
+                    child: Row(children: [
+                      Icon(Icons.group_rounded, size: 8, color: pal.fgSoft),
+                      const SizedBox(width: 2),
+                      Flexible(child: Text(classes,
+                          style: GoogleFonts.plusJakartaSans(
+                              fontSize: 9, fontWeight: FontWeight.w700,
+                              color: pal.fgSoft),
+                          overflow: TextOverflow.ellipsis, maxLines: 1)),
+                    ]),
+                  );
+                }),
               ]),
             );
           }).toList(),
@@ -2086,28 +2114,12 @@ class _MatrixScreenState extends State<MatrixScreen>
       }
 
       // Ã¢â€â‚¬Ã¢â€â‚¬ Build a proportional-width row of slot cells Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
-      List<Widget> slotRow(List slots, Map<String, List<Assignment>> pMap, String roomId) {
-        if (slots.isEmpty) return [SizedBox(width: timelineW)];
-        final lead  = slotOffset(slots.first);
-        final trail = timelineW - lead - slots.fold(0.0, (s, t) => s + slotW(t));
-        return [
-          if (lead > 0)  SizedBox(width: lead),
-          ...slots.map((ts) => rCell(ts, pMap[ts.id] ?? [],
-              clashing: isCellClashing(roomId, ts.id as String))),
-          if (trail > 0) SizedBox(width: trail),
-        ];
-      }
+      List<Widget> slotRow(List slots, Map<String, List<Assignment>> pMap, String roomId) =>
+          slots.map((ts) => rCell(ts, pMap[ts.id] ?? [],
+              clashing: isCellClashing(roomId, ts.id as String))).toList();
 
-      List<Widget> headerRow(List slots, Color accent) {
-        if (slots.isEmpty) return [SizedBox(width: timelineW)];
-        final lead  = slotOffset(slots.first);
-        final trail = timelineW - lead - slots.fold(0.0, (s, t) => s + slotW(t));
-        return [
-          if (lead > 0)  SizedBox(width: lead),
-          ...slots.map((ts) => periodHeader(ts, accent)),
-          if (trail > 0) SizedBox(width: trail),
-        ];
-      }
+      List<Widget> headerRow(List slots, Color accent) =>
+          slots.map((ts) => periodHeader(ts, accent)).toList();
 
       return Container(
         decoration: ctx.glassC(r: 20),
@@ -2119,47 +2131,22 @@ class _MatrixScreenState extends State<MatrixScreen>
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
                 // Ã¢â€â‚¬Ã¢â€â‚¬ HEADERS Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
-                if (singleLevel) ...[
-                  Container(color: ctx._hd, child: Row(children: [
-                    SizedBox(width: rowLblW, child: Padding(
-                        padding: const EdgeInsets.all(12),
-                        child: Text('Room', style: GoogleFonts.plusJakartaSans(
-                            fontWeight: FontWeight.w700, fontSize: 11, color: ctx._ts)))),
-                    ...headerRow(filteredSlots,
-                        _level == EducationLevel.bachelors ? AppTheme.accentCyan : AppTheme.accentBlue),
-                  ])),
-                ] else ...[
-                  // Row 1: Bachelors (cyan)
-                  if (bachSlots.isNotEmpty)
-                    Container(color: AppTheme.accentCyan.withValues(alpha: .07), child: Row(children: [
-                      SizedBox(width: rowLblW, child: Padding(
-                          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                          child: Text('Bach', style: GoogleFonts.plusJakartaSans(
-                              fontWeight: FontWeight.w800, fontSize: 10, color: AppTheme.accentCyan)))),
-                      ...headerRow(bachSlots, AppTheme.accentCyan),
-                    ])),
-                  // Row 2: Intermediate (blue)
-                  if (interSlots.isNotEmpty)
-                    Container(color: AppTheme.accentBlue.withValues(alpha: .07), child: Row(children: [
-                      SizedBox(width: rowLblW, child: Padding(
-                          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                          child: Text('Inter', style: GoogleFonts.plusJakartaSans(
-                              fontWeight: FontWeight.w800, fontSize: 10, color: AppTheme.accentBlue)))),
-                      ...headerRow(interSlots, AppTheme.accentBlue),
-                    ])),
-                ],
+                Container(color: ctx._hd, child: Row(children: [
+                  SizedBox(width: rowLblW, child: Padding(
+                      padding: const EdgeInsets.all(12),
+                      child: Text('Room', style: GoogleFonts.plusJakartaSans(
+                          fontWeight: FontWeight.w700, fontSize: 11, color: ctx._ts)))),
+                  ...headerRow(filteredSlots,
+                      _level == EducationLevel.bachelors ? AppTheme.accentCyan : AppTheme.accentBlue),
+                ])),
                 Divider(color: ctx._dv, height: 1),
 
-                // Ã¢â€â‚¬Ã¢â€â‚¬ TEACHER ROWS Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
+                // Room rows
                 ...teachers.map((tName) {
                   final slotMap = byTeacherSlot[tName]!;
                   final realRoomName = roomById[tName] ?? tName;
 
-                  // Detect which levels this teacher actually teaches
-                  final hasBach  = bachSlots.any((ts)  => slotMap.containsKey(ts.id));
-                  final hasInter = interSlots.any((ts) => slotMap.containsKey(ts.id));
-
-                  // Teacher label widget
+                  // Room label widget
                   Widget labelWidget = Container(
                     padding: const EdgeInsets.symmetric(vertical: 6, horizontal: 10),
                     child: Row(children: [
@@ -2181,41 +2168,11 @@ class _MatrixScreenState extends State<MatrixScreen>
                     ]),
                   );
 
-                  // Placeholder (same width as label, no content) for continuation rows
-                  final labelGap = SizedBox(width: rowLblW);
-
-                  if (singleLevel) {
-                    return Column(mainAxisSize: MainAxisSize.min, children: [
-                      Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                        SizedBox(width: rowLblW, child: labelWidget),
-                        ...slotRow(filteredSlots, slotMap, tName),
-                      ]),
-                      Divider(color: ctx._dv, height: 1),
-                    ]);
-                  }
-
-                  // All Levels: only show sub-rows for levels this teacher teaches.
-                  // A teacher with only Bach assignments Ã¢â€ â€™ 1 Bach row (no empty Inter row).
-                  // A teacher with both Ã¢â€ â€™ Bach row on top, Inter row below.
-                  // This matches ClassÃƒâ€”Period compactness exactly.
-                  final showBach  = bachSlots.isNotEmpty  && (hasBach  || !hasInter);
-                  final showInter = interSlots.isNotEmpty && (hasInter || !hasBach);
-
                   return Column(mainAxisSize: MainAxisSize.min, children: [
-                    if (showBach)
-                      Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                        SizedBox(width: rowLblW, child: labelWidget),
-                        ...slotRow(bachSlots, slotMap, tName),
-                      ]),
-                    if (showBach && showInter)
-                      Divider(color: ctx._dv.withValues(alpha: .3), height: 0.5),
-                    if (showInter)
-                      Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                        // Show label on inter row only if no bach row above it
-                        showBach ? labelGap
-                            : SizedBox(width: rowLblW, child: labelWidget),
-                        ...slotRow(interSlots, slotMap, tName),
-                      ]),
+                    Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                      SizedBox(width: rowLblW, child: labelWidget),
+                      ...slotRow(filteredSlots, slotMap, tName),
+                    ]),
                     Divider(color: ctx._dv, height: 1),
                   ]);
                 }),
@@ -2250,12 +2207,8 @@ class _MatrixScreenState extends State<MatrixScreen>
       // later column silently renders at the wrong clock position.
       return lc != 0 ? lc : _parseMin(a.startTime).compareTo(_parseMin(b.startTime));
     });
-    // Show ALL configured slots
-    final bachSlots  = allSlots.where((t) => t.level == EducationLevel.bachelors).toList();
-    final interSlots = allSlots.where((t) => t.level == EducationLevel.intermediate).toList();
-    final singleLevel = _level != null;
-    final filteredSlots = (singleLevel ? allSlots.where((t) => t.level == _level) : allSlots).toList();
-
+    // Show ALL configured slots — this ONE level's, never both at once.
+    final filteredSlots = allSlots.where((t) => t.level == _level).toList();
 
     if (filteredSlots.isEmpty) {
       return _InfoBox(icon: Icons.info_outline_rounded, color: AppTheme.accentCyan,
@@ -2267,7 +2220,7 @@ class _MatrixScreenState extends State<MatrixScreen>
     final roomById = {for (final r in dataVm.rooms) r.id: r.name};
     final Map<String, Map<String, Set<String>>> seenEntryPerTeacherSlot = {};
     final Map<String, Map<String, List<Assignment>>> byTeacherSlot = {};
-    for (final a in source.where((x) => _level == null || x.classModel.level == _level)) {
+    for (final a in source.where((x) => x.classModel.level == _level)) {
       final tName = a.teacher.name;
       final slotId = a.timeSlotId;
       if (a.id.startsWith('elec_')) {
@@ -2315,13 +2268,11 @@ class _MatrixScreenState extends State<MatrixScreen>
         final shared = a.occupiedSlots.toSet().intersection(b.occupiedSlots.toSet());
         if (shared.isEmpty) continue;
 
-        // Ignore legitimate combined courses
-        if (a.course.id == b.course.id) {
-          final isCombined = dataVm.combinedRules.any((r) => 
-              r.courseId == a.course.id &&
-              r.classIds.contains(a.classModel.id) &&
-              r.classIds.contains(b.classModel.id));
-          if (isCombined) continue;
+        // Ignore legitimate combined courses — directly or transitively
+        // combined through a shared class.
+        if (a.course.id == b.course.id &&
+            combinedRulesLinkClasses(dataVm.combinedRules, a.course.id, a.classModel.id, b.classModel.id)) {
+          continue;
         }
 
         // Ignore if either assignment's class is in an elective group at that slot
@@ -2354,36 +2305,39 @@ class _MatrixScreenState extends State<MatrixScreen>
     return LayoutBuilder(builder: (ctx2, constraints) {
       final avail   = constraints.maxWidth;
       final rowLblW = avail < 420 ? 100.0 : avail < 600 ? 130.0 : 190.0;
-      const double pxPerMin = 4.0;
-
+      final EducationLevel currentLevel = _level ?? EducationLevel.bachelors;
+      final double colW = _fixedColW(avail, rowLblW, filteredSlots.length);
       int parseMin(String t) => _parseMin(t);
-      final allStarts = filteredSlots.map((t) => parseMin(t.startTime));
-      final allEnds   = filteredSlots.map((t) => parseMin(t.endTime));
-      final globalStart = allStarts.reduce((a, b) => a < b ? a : b);
-      final globalEnd   = allEnds.reduce((a, b) => a > b ? a : b);
-      double slotW(ts)      => math.max(0.0, (parseMin(ts.endTime) - parseMin(ts.startTime)) * pxPerMin);
-      double slotOffset(ts) => math.max(0.0, (parseMin(ts.startTime) - globalStart) * pxPerMin);
-      final timelineW       = math.max(0.0, (globalEnd - globalStart) * pxPerMin);
+      const int eveningBoundaryMin = 11 * 60; // 11:00 AM — see ShiftRule
 
       // Ã¢â€â‚¬Ã¢â€â‚¬ period header cell Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
-      Widget periodHeader(ts, Color accent) => SizedBox(width: slotW(ts), child: Padding(
+      Widget periodHeader(ts, Color accent) {
+        final isEveningStart = currentLevel == EducationLevel.bachelors &&
+            parseMin(ts.startTime) >= eveningBoundaryMin;
+        return Container(
+          width: colW,
+          decoration: isEveningStart
+              ? const BoxDecoration(border: Border(left: BorderSide(color: Color(0xFFC2410C), width: 2)))
+              : null,
+          child: Padding(
         padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 2),
         child: Column(mainAxisSize: MainAxisSize.min, children: [
           Text(ts.shortLabel, style: GoogleFonts.plusJakartaSans(
-              fontWeight: FontWeight.w700, fontSize: 10, color: accent),
+              fontWeight: FontWeight.w700, fontSize: 11, color: isEveningStart ? const Color(0xFFC2410C) : accent),
               textAlign: TextAlign.center),
-          Text('${ts.startTime}-${ts.endTime}', style: GoogleFonts.plusJakartaSans(
-              fontSize: 7, color: ctx._tm), textAlign: TextAlign.center),
+          Text('${TimeSlot.format12(ts.startTime)}-${TimeSlot.format12(ts.endTime)}', style: GoogleFonts.plusJakartaSans(
+              fontSize: 8.5, color: ctx._tm), textAlign: TextAlign.center),
           if (ts.hasFridayOverride)
             Text('Fri ${ts.fridayLabel}', style: GoogleFonts.plusJakartaSans(
-                fontSize: 7, color: AppTheme.accentAmber), textAlign: TextAlign.center),
+                fontSize: 8, color: AppTheme.accentAmber), textAlign: TextAlign.center),
           if (settingsVm.fridayShortDay && ts.period > settingsVm.fridayMaxPeriod)
-            Container(margin: const EdgeInsets.only(top: 2), padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1), decoration: BoxDecoration(color: const Color(0xFFEF4444).withValues(alpha: .12), borderRadius: BorderRadius.circular(4)), child: Text('Fri off', style: GoogleFonts.plusJakartaSans(fontSize: 6, fontWeight: FontWeight.w800, color: const Color(0xFFEF4444)))),
+            Container(margin: const EdgeInsets.only(top: 2), padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1), decoration: BoxDecoration(color: const Color(0xFFEF4444).withValues(alpha: .12), borderRadius: BorderRadius.circular(4)), child: Text('Fri off', style: GoogleFonts.plusJakartaSans(fontSize: 7, fontWeight: FontWeight.w800, color: const Color(0xFFEF4444)))),
         ]),
       ));
+      }
       // Ã¢â€â‚¬Ã¢â€â‚¬ assignment cell for teacher view Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
       Widget tCell(ts, List<Assignment> aList, {bool clashing = false}) {
-        final w = slotW(ts);
+        final w = colW;
         if (aList.isEmpty) {
           return SizedBox(width: w, height: 72,
               child: Center(child: Text('-', style: TextStyle(
@@ -2407,28 +2361,22 @@ class _MatrixScreenState extends State<MatrixScreen>
             final isBach     = a.classModel.level == EducationLevel.bachelors;
             final isElective = a.id.startsWith('elec_');
             final effectiveClash = clashing;
-            final col      = effectiveClash ? AppTheme.error
-                : isElective ? AppTheme.accentAmber
-                : (isBach ? AppTheme.accentCyan : AppTheme.accentBlue);
+            final pal = _cellPalette(clash: effectiveClash, elective: !effectiveClash && isElective, bach: isBach, isDark: ctx._dk);
             final allDays  = group.expand((x) => x.occupiedSlots).toSet().toList()..sort();
             return Container(
               margin: const EdgeInsets.all(3),
               padding: const EdgeInsets.all(6),
-              decoration: BoxDecoration(
-                  color: col.withValues(alpha: effectiveClash ? .15 : .1),
-                  borderRadius: BorderRadius.circular(9),
-                  border: Border.all(color: col.withValues(alpha: effectiveClash ? .7 : .3),
-                      width: effectiveClash ? 1.5 : 1)),
+              decoration: BoxDecoration(color: pal.bg, borderRadius: BorderRadius.circular(8)),
               child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
                 // Course name row — with clash icon if clashing
                 if (effectiveClash) Row(children: [
-                  Icon(Icons.warning_amber_rounded, color: col, size: 9),
+                  Icon(Icons.warning_amber_rounded, color: pal.fg, size: 10),
                   const SizedBox(width: 2),
                   Expanded(child: Text(a.course.name, style: GoogleFonts.plusJakartaSans(
-                      fontWeight: FontWeight.w800, color: col, fontSize: 10),
+                      fontWeight: FontWeight.w800, color: pal.fg, fontSize: 11),
                       overflow: TextOverflow.ellipsis, maxLines: 1)),
                 ]) else Text(a.course.name, style: GoogleFonts.plusJakartaSans(
-                    fontWeight: FontWeight.w800, color: col, fontSize: 10),
+                    fontWeight: FontWeight.w800, color: pal.fg, fontSize: 11),
                     overflow: TextOverflow.ellipsis, maxLines: 1),
                 const SizedBox(height: 2),
                 // Secondary info: class names (electives list all attending classes)
@@ -2448,31 +2396,31 @@ class _MatrixScreenState extends State<MatrixScreen>
                     }
                   }
                   return Text(label, style: GoogleFonts.plusJakartaSans(
-                      fontSize: 8, color: isElective ? AppTheme.accentAmber : ctx._ts,
+                      fontSize: 9, color: pal.fgSoft,
                       fontWeight: isElective ? FontWeight.w700 : FontWeight.w400),
                       overflow: TextOverflow.ellipsis, maxLines: 2);
                 }),
                 // Days row — same icon + format as class-wise
                 if (formatDaysLabel(allDays) != null) Row(children: [
                   Icon(Icons.calendar_today_rounded,
-                      size: 7, color: effectiveClash ? col : ctx._tm),
+                      size: 8, color: pal.fgSoft),
                   const SizedBox(width: 2),
                   Flexible(child: Text('Days: ${formatDaysLabel(allDays)}',
                       style: GoogleFonts.plusJakartaSans(
-                          fontSize: 8, fontWeight: FontWeight.w700,
-                          color: effectiveClash ? col : ctx._tm),
+                          fontSize: 9, fontWeight: FontWeight.w700,
+                          color: pal.fgSoft),
                       overflow: TextOverflow.ellipsis, maxLines: 1)),
                 ]),
                 if (a.hasRoom) ...[
                   const SizedBox(height: 1),
                   Row(children: [
                     Icon(Icons.meeting_room_rounded,
-                        size: 7, color: effectiveClash ? col : ctx._tm),
+                        size: 8, color: pal.fgSoft),
                     const SizedBox(width: 2),
                     Flexible(child: Text(roomById[a.roomId] ?? 'Unknown',
                         style: GoogleFonts.plusJakartaSans(
-                            fontSize: 8, fontWeight: FontWeight.w700,
-                            color: effectiveClash ? col : ctx._tm),
+                            fontSize: 9, fontWeight: FontWeight.w700,
+                            color: pal.fgSoft),
                         overflow: TextOverflow.ellipsis, maxLines: 1)),
                   ]),
                 ],
@@ -2483,28 +2431,12 @@ class _MatrixScreenState extends State<MatrixScreen>
       }
 
       // Ã¢â€â‚¬Ã¢â€â‚¬ Build a proportional-width row of slot cells Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
-      List<Widget> slotRow(List slots, Map<String, List<Assignment>> pMap, String teacherName) {
-        if (slots.isEmpty) return [SizedBox(width: timelineW)];
-        final lead  = slotOffset(slots.first);
-        final trail = timelineW - lead - slots.fold(0.0, (s, t) => s + slotW(t));
-        return [
-          if (lead > 0)  SizedBox(width: lead),
-          ...slots.map((ts) => tCell(ts, pMap[ts.id] ?? [],
-              clashing: isCellClashing(teacherName, ts.id as String))),
-          if (trail > 0) SizedBox(width: trail),
-        ];
-      }
+      List<Widget> slotRow(List slots, Map<String, List<Assignment>> pMap, String teacherName) =>
+          slots.map((ts) => tCell(ts, pMap[ts.id] ?? [],
+              clashing: isCellClashing(teacherName, ts.id as String))).toList();
 
-      List<Widget> headerRow(List slots, Color accent) {
-        if (slots.isEmpty) return [SizedBox(width: timelineW)];
-        final lead  = slotOffset(slots.first);
-        final trail = timelineW - lead - slots.fold(0.0, (s, t) => s + slotW(t));
-        return [
-          if (lead > 0)  SizedBox(width: lead),
-          ...slots.map((ts) => periodHeader(ts, accent)),
-          if (trail > 0) SizedBox(width: trail),
-        ];
-      }
+      List<Widget> headerRow(List slots, Color accent) =>
+          slots.map((ts) => periodHeader(ts, accent)).toList();
 
       return Container(
         decoration: ctx.glassC(r: 20),
@@ -2516,45 +2448,20 @@ class _MatrixScreenState extends State<MatrixScreen>
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
                 // Ã¢â€â‚¬Ã¢â€â‚¬ HEADERS Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
-                if (singleLevel) ...[
-                  Container(color: ctx._hd, child: Row(children: [
-                    SizedBox(width: rowLblW, child: Padding(
-                        padding: const EdgeInsets.all(12),
-                        child: Text('Teacher', style: GoogleFonts.plusJakartaSans(
-                            fontWeight: FontWeight.w700, fontSize: 11, color: ctx._ts)))),
-                    ...headerRow(filteredSlots,
-                        _level == EducationLevel.bachelors ? AppTheme.accentCyan : AppTheme.accentBlue),
-                  ])),
-                ] else ...[
-                  // Row 1: Bachelors (cyan)
-                  if (bachSlots.isNotEmpty)
-                    Container(color: AppTheme.accentCyan.withValues(alpha: .07), child: Row(children: [
-                      SizedBox(width: rowLblW, child: Padding(
-                          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                          child: Text('Bach', style: GoogleFonts.plusJakartaSans(
-                              fontWeight: FontWeight.w800, fontSize: 10, color: AppTheme.accentCyan)))),
-                      ...headerRow(bachSlots, AppTheme.accentCyan),
-                    ])),
-                  // Row 2: Intermediate (blue)
-                  if (interSlots.isNotEmpty)
-                    Container(color: AppTheme.accentBlue.withValues(alpha: .07), child: Row(children: [
-                      SizedBox(width: rowLblW, child: Padding(
-                          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                          child: Text('Inter', style: GoogleFonts.plusJakartaSans(
-                              fontWeight: FontWeight.w800, fontSize: 10, color: AppTheme.accentBlue)))),
-                      ...headerRow(interSlots, AppTheme.accentBlue),
-                    ])),
-                ],
+                Container(color: ctx._hd, child: Row(children: [
+                  SizedBox(width: rowLblW, child: Padding(
+                      padding: const EdgeInsets.all(12),
+                      child: Text('Teacher', style: GoogleFonts.plusJakartaSans(
+                          fontWeight: FontWeight.w700, fontSize: 11, color: ctx._ts)))),
+                  ...headerRow(filteredSlots,
+                      _level == EducationLevel.bachelors ? AppTheme.accentCyan : AppTheme.accentBlue),
+                ])),
                 Divider(color: ctx._dv, height: 1),
 
-                // Ã¢â€â‚¬Ã¢â€â‚¬ TEACHER ROWS Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
+                // Teacher rows
                 ...teachers.map((tName) {
                   final slotMap = byTeacherSlot[tName]!;
                   final realRoomName = roomById[tName] ?? tName;
-
-                  // Detect which levels this teacher actually teaches
-                  final hasBach  = bachSlots.any((ts)  => slotMap.containsKey(ts.id));
-                  final hasInter = interSlots.any((ts) => slotMap.containsKey(ts.id));
 
                   // Teacher label widget
                   Widget labelWidget = Container(
@@ -2578,41 +2485,11 @@ class _MatrixScreenState extends State<MatrixScreen>
                     ]),
                   );
 
-                  // Placeholder (same width as label, no content) for continuation rows
-                  final labelGap = SizedBox(width: rowLblW);
-
-                  if (singleLevel) {
-                    return Column(mainAxisSize: MainAxisSize.min, children: [
-                      Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                        SizedBox(width: rowLblW, child: labelWidget),
-                        ...slotRow(filteredSlots, slotMap, tName),
-                      ]),
-                      Divider(color: ctx._dv, height: 1),
-                    ]);
-                  }
-
-                  // All Levels: only show sub-rows for levels this teacher teaches.
-                  // A teacher with only Bach assignments Ã¢â€ â€™ 1 Bach row (no empty Inter row).
-                  // A teacher with both Ã¢â€ â€™ Bach row on top, Inter row below.
-                  // This matches ClassÃƒâ€”Period compactness exactly.
-                  final showBach  = bachSlots.isNotEmpty  && (hasBach  || !hasInter);
-                  final showInter = interSlots.isNotEmpty && (hasInter || !hasBach);
-
                   return Column(mainAxisSize: MainAxisSize.min, children: [
-                    if (showBach)
-                      Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                        SizedBox(width: rowLblW, child: labelWidget),
-                        ...slotRow(bachSlots, slotMap, tName),
-                      ]),
-                    if (showBach && showInter)
-                      Divider(color: ctx._dv.withValues(alpha: .3), height: 0.5),
-                    if (showInter)
-                      Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                        // Show label on inter row only if no bach row above it
-                        showBach ? labelGap
-                            : SizedBox(width: rowLblW, child: labelWidget),
-                        ...slotRow(interSlots, slotMap, tName),
-                      ]),
+                    Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                      SizedBox(width: rowLblW, child: labelWidget),
+                      ...slotRow(filteredSlots, slotMap, tName),
+                    ]),
                     Divider(color: ctx._dv, height: 1),
                   ]);
                 }),
@@ -2646,23 +2523,22 @@ class _ViewTab extends StatelessWidget {
         child: AnimatedContainer(duration: const Duration(milliseconds: 200),
           padding: const EdgeInsets.symmetric(vertical: 13, horizontal: 16),
           decoration: BoxDecoration(
-              color: selected ? color.withValues(alpha: .15) : Colors.transparent,
-              borderRadius: BorderRadius.circular(12),
-              border: selected ? Border.all(color: color.withValues(alpha: .4)) : null),
+              color: selected ? color : Colors.transparent,
+              borderRadius: BorderRadius.circular(12)),
           child: Row(mainAxisSize: MainAxisSize.min, children: [
             Icon(icon,
-                color: selected ? color : (isDark ? AppTheme.textMuted : AppTheme.lightTextMut),
+                color: selected ? Colors.white : (isDark ? AppTheme.textMuted : AppTheme.lightTextMut),
                 size: 18),
             const SizedBox(width: 8),
             Flexible(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
               Text(label, style: GoogleFonts.plusJakartaSans(
                   fontWeight: FontWeight.w700,
                   fontSize: 13,
-                  color: selected ? color : unselTs),
+                  color: selected ? Colors.white : unselTs),
                   overflow: TextOverflow.ellipsis),
               if (sublabel.isNotEmpty)
                 Text(sublabel, style: GoogleFonts.plusJakartaSans(
-                    fontSize: 11, color: unselTm),
+                    fontSize: 11, color: selected ? Colors.white.withValues(alpha: .85) : unselTm),
                     overflow: TextOverflow.ellipsis),
             ])),
           ]),
@@ -2767,7 +2643,6 @@ class _MoveCourseDialogState extends State<_MoveCourseDialog> {
     final ts = isDark ? const Color(0xFF94A3B8) : const Color(0xFF64748B);
     final cd = isDark ? const Color(0xFF1E293B) : Colors.white;
     final bd = isDark ? const Color(0xFF334155) : const Color(0xFFE2E8F0);
-    const cyan = AppTheme.accentCyan;
 
     final classes = _vm.classes.toList()
       ..sort((a, b) => _classLabel(a).compareTo(_classLabel(b)));
@@ -2793,7 +2668,7 @@ class _MoveCourseDialogState extends State<_MoveCourseDialog> {
               Container(
                 width: 42, height: 42,
                 decoration: BoxDecoration(
-                  gradient: const LinearGradient(colors: [AppTheme.accentCyan, Color(0xFF0891B2)]),
+                  color: const Color(0xFF0E7490),
                   borderRadius: BorderRadius.circular(12),
                 ),
                 child: const Icon(Icons.open_with_rounded, color: Colors.white, size: 22),
@@ -2838,11 +2713,14 @@ class _MoveCourseDialogState extends State<_MoveCourseDialog> {
               const SizedBox(height: 12),
               Container(
                 padding: const EdgeInsets.all(10),
-                decoration: BoxDecoration(color: AppTheme.error.withValues(alpha: .1), borderRadius: BorderRadius.circular(10)),
+                decoration: BoxDecoration(
+                    color: isDark ? const Color(0xFF7F1D1D) : const Color(0xFFFEE2E2),
+                    borderRadius: BorderRadius.circular(10)),
                 child: Row(children: [
-                  Icon(Icons.error_outline_rounded, size: 16, color: AppTheme.error),
+                  Icon(Icons.error_outline_rounded, size: 16, color: isDark ? Colors.white : AppTheme.error),
                   const SizedBox(width: 8),
-                  Expanded(child: Text(_error!, style: GoogleFonts.plusJakartaSans(fontSize: 12, color: AppTheme.error))),
+                  Expanded(child: Text(_error!, style: GoogleFonts.plusJakartaSans(
+                      fontSize: 12, color: isDark ? Colors.white : AppTheme.error))),
                 ]),
               ),
             ],
@@ -2851,7 +2729,7 @@ class _MoveCourseDialogState extends State<_MoveCourseDialog> {
               width: double.infinity,
               child: FilledButton(
                 onPressed: (_selectedAssignment != null && _targetSlotId != null) ? _apply : null,
-                style: FilledButton.styleFrom(backgroundColor: cyan, padding: const EdgeInsets.symmetric(vertical: 14),
+                style: FilledButton.styleFrom(backgroundColor: const Color(0xFF0E7490), padding: const EdgeInsets.symmetric(vertical: 14),
                     shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12))),
                 child: Text('Move', style: GoogleFonts.plusJakartaSans(fontWeight: FontWeight.w800, color: Colors.white)),
               ),
@@ -3058,7 +2936,12 @@ class _TeacherTransferDialogState extends State<_TeacherTransferDialog> {
     final ts = isDark ? const Color(0xFF94A3B8) : const Color(0xFF64748B);
     final cd = isDark ? const Color(0xFF1E293B) : Colors.white;
     final bd = isDark ? const Color(0xFF334155) : const Color(0xFFE2E8F0);
-    const orange = Color(0xFFF97316);
+    const orange = Color(0xFFC2410C);
+    // Solid state fill — deep orange + white text in dark mode, light
+    // pastel orange + deep orange text in light mode (matches the matrix
+    // grid's palette: no translucent tints for state-bearing chips/badges).
+    final selBg = isDark ? orange : const Color(0xFFFFEDD5);
+    final selFg = isDark ? Colors.white : orange;
 
     final teachers = _vm.teachers.toList()
       ..sort((a, b) => a.name.compareTo(b.name));
@@ -3090,7 +2973,7 @@ class _TeacherTransferDialogState extends State<_TeacherTransferDialog> {
                 Container(
                   width: 42, height: 42,
                   decoration: BoxDecoration(
-                    gradient: const LinearGradient(colors: [Color(0xFFF97316), Color(0xFFEA580C)]),
+                    color: orange,
                     borderRadius: BorderRadius.circular(12),
                     boxShadow: [BoxShadow(color: orange.withValues(alpha: .35), blurRadius: 12, offset: const Offset(0, 4))],
                   ),
@@ -3128,11 +3011,11 @@ class _TeacherTransferDialogState extends State<_TeacherTransferDialog> {
               Padding(
                 padding: const EdgeInsets.fromLTRB(24, 14, 24, 4),
                 child: Row(children: [
-                  _stepChip('1', 'Check teachers leaving', orange),
+                  _stepChip('1', 'Check teachers leaving', orange, isDark),
                   const SizedBox(width: 12),
-                  _stepChip('2', 'Pick their replacement', orange),
+                  _stepChip('2', 'Pick their replacement', orange, isDark),
                   const SizedBox(width: 12),
-                  _stepChip('3', 'Tap Apply All', orange),
+                  _stepChip('3', 'Tap Apply All', orange, isDark),
                 ]),
               ),
 
@@ -3243,13 +3126,13 @@ class _TeacherTransferDialogState extends State<_TeacherTransferDialog> {
                         Container(
                           width: 32, height: 32,
                           decoration: BoxDecoration(
-                            color: isLeaving ? orange.withValues(alpha: .12) : (isDark ? const Color(0xFF334155) : const Color(0xFFF1F5F9)),
+                            color: isLeaving ? selBg : (isDark ? const Color(0xFF334155) : const Color(0xFFF1F5F9)),
                             borderRadius: BorderRadius.circular(9),
                           ),
                           child: Center(child: Text(
                             t.name.isNotEmpty ? t.name[0].toUpperCase() : '?',
                             style: GoogleFonts.plusJakartaSans(fontWeight: FontWeight.w800, fontSize: 14,
-                                color: isLeaving ? orange : ts),
+                                color: isLeaving ? selFg : ts),
                           )),
                         ),
                         const SizedBox(width: 10),
@@ -3272,14 +3155,13 @@ class _TeacherTransferDialogState extends State<_TeacherTransferDialog> {
                                       padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                                       decoration: BoxDecoration(
                                         color: isSel
-                                            ? orange.withValues(alpha: .15)
+                                            ? selBg
                                             : (isDark ? const Color(0xFF334155) : const Color(0xFFF1F5F9)),
                                         borderRadius: BorderRadius.circular(6),
-                                        border: isSel ? Border.all(color: orange, width: 1) : null,
                                       ),
                                       child: Text(_classLabel(c), style: GoogleFonts.plusJakartaSans(
                                           fontSize: 9, fontWeight: FontWeight.w600,
-                                          color: isSel ? orange : ts)),
+                                          color: isSel ? selFg : ts)),
                                     ),
                                   );
                                 }),
@@ -3295,7 +3177,7 @@ class _TeacherTransferDialogState extends State<_TeacherTransferDialog> {
                             padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
                             decoration: BoxDecoration(
                               color: total > 0
-                                  ? (isLeaving ? orange.withValues(alpha: .15) : (isDark ? const Color(0xFF334155) : const Color(0xFFF1F5F9)))
+                                  ? (isLeaving ? selBg : (isDark ? const Color(0xFF334155) : const Color(0xFFF1F5F9)))
                                   : Colors.transparent,
                               borderRadius: BorderRadius.circular(20),
                             ),
@@ -3303,7 +3185,7 @@ class _TeacherTransferDialogState extends State<_TeacherTransferDialog> {
                               total > 0 ? '$total period${total != 1 ? "s" : ""}' : '—',
                               style: GoogleFonts.plusJakartaSans(
                                   fontSize: 10, fontWeight: FontWeight.w700,
-                                  color: total > 0 ? (isLeaving ? orange : ts) : ts),
+                                  color: total > 0 ? (isLeaving ? selFg : ts) : ts),
                               textAlign: TextAlign.center,
                               overflow: TextOverflow.ellipsis,
                               maxLines: 1,
@@ -3459,12 +3341,11 @@ class _TeacherTransferDialogState extends State<_TeacherTransferDialog> {
     );
   }
 
-  Widget _stepChip(String num, String label, Color color) => Container(
+  Widget _stepChip(String num, String label, Color color, bool isDark) => Container(
     padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
     decoration: BoxDecoration(
-      color: color.withValues(alpha: .10),
+      color: isDark ? const Color(0xFF7C2D12) : const Color(0xFFFFEDD5),
       borderRadius: BorderRadius.circular(20),
-      border: Border.all(color: color.withValues(alpha: .25)),
     ),
     child: Row(mainAxisSize: MainAxisSize.min, children: [
       Container(
@@ -3474,7 +3355,8 @@ class _TeacherTransferDialogState extends State<_TeacherTransferDialog> {
             fontSize: 10, fontWeight: FontWeight.w900, color: Colors.white))),
       ),
       const SizedBox(width: 6),
-      Text(label, style: GoogleFonts.plusJakartaSans(fontSize: 11, fontWeight: FontWeight.w700, color: color)),
+      Text(label, style: GoogleFonts.plusJakartaSans(fontSize: 11, fontWeight: FontWeight.w700,
+          color: isDark ? const Color(0xFFFDBA74) : color)),
     ]),
   );
 
@@ -3500,16 +3382,24 @@ class _TeacherTransferDialogState extends State<_TeacherTransferDialog> {
     final classes = _vm.classes.toList()
       ..sort((a, b) => _classLabel(a).compareTo(_classLabel(b)));
     final periods = _swapClassId == null ? <Assignment>[] : _swapAssignmentsForClass(_swapClassId!);
+    const blue = AppTheme.accentBlue;
+    // Solid "picked" row fill for pick A (orange) / pick B (blue) — light
+    // pastel + deep text in light mode, deep solid + white text in dark.
+    ({Color bg, Color fg}) pickPal(Color base) {
+      final isBlue = base == blue;
+      if (isDark) return (bg: base, fg: Colors.white);
+      return (bg: isBlue ? const Color(0xFFDBEAFE) : const Color(0xFFFFEDD5), fg: base);
+    }
 
     return SingleChildScrollView(
       padding: const EdgeInsets.fromLTRB(24, 14, 24, 4),
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
         Row(children: [
-          _stepChip('1', 'Pick a class', orange),
+          _stepChip('1', 'Pick a class', orange, isDark),
           const SizedBox(width: 12),
-          _stepChip('2', 'Pick two teachers', orange),
+          _stepChip('2', 'Pick two teachers', orange, isDark),
           const SizedBox(width: 12),
-          _stepChip('3', 'Tap Swap', orange),
+          _stepChip('3', 'Tap Swap', orange, isDark),
         ]),
         const SizedBox(height: 16),
         Text('Class', style: GoogleFonts.plusJakartaSans(fontSize: 11, fontWeight: FontWeight.w700, color: ts)),
@@ -3565,9 +3455,9 @@ class _TeacherTransferDialogState extends State<_TeacherTransferDialog> {
                   child: Container(
                     padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
                     decoration: BoxDecoration(
-                      color: isPicked ? pickColor.withValues(alpha: .12) : (isDark ? const Color(0xFF0F172A) : const Color(0xFFF8FAFC)),
+                      color: isPicked ? pickPal(pickColor).bg : (isDark ? const Color(0xFF0F172A) : const Color(0xFFF8FAFC)),
                       borderRadius: BorderRadius.circular(12),
-                      border: Border.all(color: isPicked ? pickColor : bd, width: isPicked ? 1.4 : 1),
+                      border: isPicked ? null : Border.all(color: bd, width: 1),
                     ),
                     child: Row(children: [
                       if (isPicked)
@@ -3582,7 +3472,7 @@ class _TeacherTransferDialogState extends State<_TeacherTransferDialog> {
                         const SizedBox(width: 30),
                       Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
                         Text(a.teacher.name, style: GoogleFonts.plusJakartaSans(
-                            fontWeight: FontWeight.w700, fontSize: 13, color: isPicked ? pickColor : tp)),
+                            fontWeight: FontWeight.w700, fontSize: 13, color: isPicked ? pickPal(pickColor).fg : tp)),
                         Text('${a.course.name} • ${a.slotLabel}',
                             style: GoogleFonts.plusJakartaSans(fontSize: 11, color: ts)),
                       ])),

@@ -631,6 +631,16 @@ class DataEntryViewModel extends ChangeNotifier {
               .map((d) => ShiftRule.fromJson(d as Map<String, dynamic>)));
         }
 
+        if (data['syncAll'] != null) {
+          _syncAll = data['syncAll'] as bool? ?? true;
+        }
+        if (data['syncClassIds'] != null) {
+          final List decoded = _decodeList(data['syncClassIds']);
+          _syncClassIds
+            ..clear()
+            ..addAll(decoded.map((d) => d as String));
+        }
+
         if (data['teachers'] != null) {
           final List decoded = _decodeList(data['teachers']);
           _teachers.clear();
@@ -828,12 +838,122 @@ class DataEntryViewModel extends ChangeNotifier {
     if (_isLoading || !_hasLoadedData) {
       return;
     }
-    _doc.set({
+    _doc.set(_serializeAll(), SetOptions(merge: true));
+  }
+
+  // ── Sync selection: which classes get published to the student app ──
+  // Default is "everything" (_syncAll = true) so existing users see no
+  // change until they deliberately narrow it down — e.g. to hide empty/
+  // unused sections that would otherwise clutter the student app with
+  // free teachers and rooms nobody needs to see there.
+  bool _syncAll = true;
+  final Set<String> _syncClassIds = {};
+  bool get syncAll => _syncAll;
+  Set<String> get syncClassIds => _syncClassIds;
+
+  void setSyncSelection({required bool syncAll, required Set<String> classIds}) {
+    _syncAll = syncAll;
+    _syncClassIds
+      ..clear()
+      ..addAll(classIds);
+    notifyListeners();
+    _saveData();
+  }
+
+  /// Publishes the current in-memory schedule to `public_timetable/current`
+  /// — a read-only snapshot the separate student-facing viewer app syncs
+  /// from. Deliberate/manual (called only from the Settings screen's "Sync
+  /// to Student App" button), not a live mirror, so students never see a
+  /// schedule mid-edit. Only the selected classes (see [setSyncSelection])
+  /// go out, along with just the teachers/rooms/courses those classes
+  /// actually use — an unused teacher or an empty room never appears.
+  Future<void> publishForStudents() async {
+    final selected =
+        _syncAll ? _classes.map((c) => c.id).toSet() : _syncClassIds;
+
+    final classes = _classes.where((c) => selected.contains(c.id)).toList();
+    final classIds = classes.map((c) => c.id).toSet();
+    final programs =
+        _programs.where((p) => classes.any((c) => c.programId == p.id)).toList();
+    final assignments =
+        _assignments.where((a) => classIds.contains(a.classModel.id)).toList();
+    final electiveGroups = _electiveGroups
+        .where((g) => g.classIds.any(classIds.contains))
+        .map((g) => g.copyWith(
+            classIds: g.classIds.where(classIds.contains).toList()))
+        .toList();
+
+    final teacherIds = {
+      for (final a in assignments) a.teacher.id,
+      for (final g in electiveGroups)
+        for (final e in g.entries) e.teacherId,
+    };
+    final roomIds = {
+      for (final a in assignments)
+        if (a.roomId != null) a.roomId!,
+      for (final g in electiveGroups)
+        for (final e in g.entries)
+          if (e.roomId != null) e.roomId!,
+    };
+    final courseIds = {
+      for (final a in assignments) a.course.id,
+      for (final g in electiveGroups)
+        for (final e in g.entries) e.courseId,
+    };
+
+    final data = _serializeAll(
+      teachers: _teachers.where((t) => teacherIds.contains(t.id)).toList(),
+      courses: _courses.where((c) => courseIds.contains(c.id)).toList(),
+      programs: programs,
+      classes: classes,
+      rooms: _rooms.where((r) => roomIds.contains(r.id)).toList(),
+      assignments: assignments,
+      electiveGroups: electiveGroups,
+    );
+    data['publishedAt'] = FieldValue.serverTimestamp();
+    await FirebaseFirestore.instance
+        .collection('public_timetable')
+        .doc('current')
+        .set(data);
+  }
+
+  /// Last time [publishForStudents] succeeded, or null if never published.
+  Future<DateTime?> lastPublishedAt() async {
+    final snap = await FirebaseFirestore.instance
+        .collection('public_timetable')
+        .doc('current')
+        .get();
+    final ts = snap.data()?['publishedAt'];
+    return ts is Timestamp ? ts.toDate() : null;
+  }
+
+  /// The same field shape written to Firestore by both [_saveData] (the
+  /// admin's own per-uid doc, always the full data) and [publishForStudents]
+  /// (the public read-only snapshot, optionally a filtered subset via the
+  /// override params) — kept as one function so the two never drift.
+  Map<String, dynamic> _serializeAll({
+    List<Teacher>? teachers,
+    List<Course>? courses,
+    List<ProgramGroup>? programs,
+    List<ClassModel>? classes,
+    List<Room>? rooms,
+    List<Assignment>? assignments,
+    List<ElectiveGroup>? electiveGroups,
+  }) {
+    teachers ??= _teachers;
+    courses ??= _courses;
+    programs ??= _programs;
+    classes ??= _classes;
+    rooms ??= _rooms;
+    assignments ??= _assignments;
+    electiveGroups ??= _electiveGroups;
+
+    return {
       'departments': jsonEncode(_departments),
-      'teachers': jsonEncode(_teachers
+      'teachers': jsonEncode(teachers
           .map((t) => {'id': t.id, 'name': t.name, 'department': t.department})
           .toList()),
-      'courses': jsonEncode(_courses
+      'courses': jsonEncode(courses
           .map((c) => {
                 'id': c.id,
                 'name': c.name,
@@ -842,10 +962,10 @@ class DataEntryViewModel extends ChangeNotifier {
                 'level': c.level.index
               })
           .toList()),
-      'programs': jsonEncode(_programs
+      'programs': jsonEncode(programs
           .map((p) => {'id': p.id, 'name': p.name, 'level': p.level.index})
           .toList()),
-      'classes': jsonEncode(_classes
+      'classes': jsonEncode(classes
           .map((c) => {
                 'id': c.id,
                 'programId': c.programId,
@@ -854,7 +974,7 @@ class DataEntryViewModel extends ChangeNotifier {
                 'level': c.level.index
               })
           .toList()),
-      'rooms': jsonEncode(_rooms
+      'rooms': jsonEncode(rooms
           .map((r) => {
                 'id': r.id,
                 'name': r.name,
@@ -879,9 +999,11 @@ class DataEntryViewModel extends ChangeNotifier {
       'combinedRules':
           jsonEncode(_combinedRules.map((e) => e.toJson()).toList()),
       'electiveGroups':
-          jsonEncode(_electiveGroups.map((g) => g.toJson()).toList()),
+          jsonEncode(electiveGroups.map((g) => g.toJson()).toList()),
       'shiftRules': jsonEncode(_shiftRules.map((r) => r.toJson()).toList()),
-      'assignments': jsonEncode(_assignments
+      'syncAll': _syncAll,
+      'syncClassIds': jsonEncode(_syncClassIds.toList()),
+      'assignments': jsonEncode(assignments
           .map((a) => {
                 'id': a.id,
                 'teacher': {
@@ -910,7 +1032,7 @@ class DataEntryViewModel extends ChangeNotifier {
                 'autoAssigned': a.autoAssigned,
               })
           .toList()),
-    }, SetOptions(merge: true));
+    };
   }
 
   // NOTE: these fields are plain nested Lists/Maps (not jsonEncode'd
@@ -1344,10 +1466,11 @@ class DataEntryViewModel extends ChangeNotifier {
   }
 
   // ── Combined Courses ─────────────────────────────────────────────────────────
+  /// Returns log lines describing what happened, or a single line starting
+  /// with 'ERROR:' if the rule was rejected outright (nothing is saved in
+  /// that case — callers should check for that prefix before treating this
+  /// as success).
   List<String> addCombinedRule(CombinedClassRule rule) {
-    _combinedRules.add(rule);
-    final log = <String>[];
-
     // ── 1. Collect best existing assignment per class ────────────────────────
     final Map<String, Assignment> byClassId = {};
     for (final a in _assignments) {
@@ -1361,16 +1484,33 @@ class DataEntryViewModel extends ChangeNotifier {
       }
     }
 
+    // Require at least one of the selected classes to already have this
+    // course allocated — combining is meant to sync siblings to a real
+    // allocation, not conjure one from nothing.
     if (byClassId.isEmpty) {
-      // No existing assignments â€” just save the rule for future assignments.
-      log.add(
-          'Rule saved. Assign the course to any class; siblings will auto-combine.');
-      _saveData();
-      notifyListeners();
-      return log;
+      return const [
+        'ERROR: None of the selected classes has this course allocated yet. '
+            'Assign it to at least one of them first, then combine.'
+      ];
     }
 
-    // â”€â”€ 2. Pick anchor: class with the most occupied days â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    // Reject a teacher mismatch instead of silently overriding it — if the
+    // course is already taught by two different teachers across the
+    // selected classes, that's a real scheduling decision the admin needs
+    // to resolve first, not something to force-merge silently.
+    final distinctTeachers = {for (final a in byClassId.values) a.teacher.id};
+    if (distinctTeachers.length > 1) {
+      final names = {for (final a in byClassId.values) a.teacher.name}.join(', ');
+      return [
+        'ERROR: This course is taught by different teachers across these classes '
+            '($names). Make them the same teacher first, then combine.'
+      ];
+    }
+
+    _combinedRules.add(rule);
+    final log = <String>[];
+
+    // ── 2. Pick anchor: class with the most occupied days ────────────────────
     // Pick anchor: prefer an already-locked assignment; fallback: most days
     final lockedCIds = _timeSlotLocks.map((l) => l.courseId).toSet();
     Assignment anchor = byClassId.values.reduce(
@@ -1961,6 +2101,14 @@ class DataEntryViewModel extends ChangeNotifier {
     if (idx == -1) return;
     final level = _timeSlots[idx].level;
     _timeSlots.removeAt(idx);
+    // Every other remove*() cascades to _assignments (removeTeacher,
+    // removeCourse, removeClass, removeProgram) — this one was the one
+    // exception, which is what let assignments end up pointing at a
+    // timeSlotId that no longer resolves to anything (shows as a raw id
+    // instead of a period/time label, and vanishes from the Matrix since
+    // it has no column to render into).
+    _assignments.removeWhere((a) => a.timeSlotId == id);
+    _electiveGroups.removeWhere((eg) => eg.timeSlotId == id);
 
     final levelSlots = _timeSlots.where((t) => t.level == level).toList();
     for (int i = 0; i < levelSlots.length; i++) {
@@ -2142,6 +2290,35 @@ class DataEntryViewModel extends ChangeNotifier {
       roomId: roomId,
       autoAssigned: a.autoAssigned,
     );
+
+    // Combined classes share slot/teacher/room by definition (see
+    // addCombinedRule) — propagate the new room to every sibling assignment
+    // in the same combined-course group so picking a room here for one of
+    // them doesn't leave the rest of the group in a different room.
+    final group = _combinedRules
+        .where((r) => r.courseId == a.course.id && r.classIds.contains(a.classModel.id))
+        .firstOrNull;
+    if (group != null) {
+      for (int i = 0; i < _assignments.length; i++) {
+        final sib = _assignments[i];
+        if (sib.id == a.id) continue;
+        if (sib.course.id != a.course.id) continue;
+        if (!group.classIds.contains(sib.classModel.id)) continue;
+        _assignments[i] = Assignment(
+          id: sib.id,
+          teacher: sib.teacher,
+          course: sib.course,
+          classModel: sib.classModel,
+          startSlot: sib.startSlot,
+          duration: sib.duration,
+          timeSlotId: sib.timeSlotId,
+          customDays: sib.customDays,
+          roomId: roomId,
+          autoAssigned: sib.autoAssigned,
+        );
+      }
+    }
+
     notifyListeners();
     _saveData();
   }
@@ -2697,19 +2874,23 @@ class DataEntryViewModel extends ChangeNotifier {
     void checkPair(Assignment a, Assignment b) {
       final shared = a.occupiedSlots.toSet().intersection(b.occupiedSlots.toSet());
       if (shared.isEmpty) return;
-      if (a.course.id == b.course.id) {
-        final isCombined = _combinedRules.any((r) =>
-            r.courseId == a.course.id &&
-            r.classIds.contains(a.classModel.id) &&
-            r.classIds.contains(b.classModel.id));
-        if (isCombined) return;
+      if (a.course.id == b.course.id &&
+          combinedRulesLinkClasses(_combinedRules, a.course.id, a.classModel.id, b.classModel.id)) {
+        return;
       }
       final aEgId = egIdCache[a.id];
       final bEgId = egIdCache[b.id];
       if (aEgId != null && aEgId == bEgId) return;
 
+      // Bachelor-only: two different courses, two different teachers, same
+      // class, same time — an allowed parallel session, not a clash.
+      final bachelorParallel = a.classModel.id == b.classModel.id &&
+          a.classModel.level == EducationLevel.bachelors &&
+          b.classModel.level == EducationLevel.bachelors &&
+          a.teacher.id != b.teacher.id;
+
       if ((a.teacher.id.isNotEmpty && a.teacher.id == b.teacher.id) ||
-          a.classModel.id == b.classModel.id ||
+          (a.classModel.id == b.classModel.id && !bachelorParallel) ||
           (a.hasRoom && b.hasRoom && a.roomId == b.roomId && validRoomIds.contains(a.roomId))) {
         clashCount++;
       }
@@ -2795,14 +2976,7 @@ class DataEntryViewModel extends ChangeNotifier {
 
     bool isCombinedMatch(Assignment a, Assignment b) {
       if (a.course.id != b.course.id) return false;
-      for (final rule in _combinedRules) {
-        if (rule.courseId == a.course.id &&
-            rule.classIds.contains(a.classModel.id) &&
-            rule.classIds.contains(b.classModel.id)) {
-          return true;
-        }
-      }
-      return false;
+      return combinedRulesLinkClasses(_combinedRules, a.course.id, a.classModel.id, b.classModel.id);
     }
 
     /// Move [loser] entirely to a clash-free slot+days, or trim as last resort.
@@ -3134,7 +3308,14 @@ class DataEntryViewModel extends ChangeNotifier {
           }
 
           // Ã¢â€â‚¬Ã¢â€â‚¬ CLASS CLASH Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
-          if (a.classModel.id == b.classModel.id) {
+          // Bachelor-only: two different courses, two different teachers
+          // (guaranteed by this point — same-teacher pairs already handled
+          // and `continue`d above), same class, same time — an allowed
+          // parallel session, not a clash.
+          final bachelorParallel = a.classModel.level == EducationLevel.bachelors &&
+              b.classModel.level == EducationLevel.bachelors &&
+              a.course.id != b.course.id;
+          if (a.classModel.id == b.classModel.id && !bachelorParallel) {
             final pk = '${a.id}|${b.id}';
             if (unresolvable.contains(pk)) continue;
             final combinedCourseIds =
@@ -3514,8 +3695,12 @@ class DataEntryViewModel extends ChangeNotifier {
             final sh = a2.occupiedSlots.toSet().intersection(b2.occupiedSlots.toSet());
             if (sh.isEmpty) continue;
             if (isCombinedMatch(a2, b2)) continue;
+            final bachelorParallel7 = a2.classModel.id == b2.classModel.id &&
+                a2.classModel.level == EducationLevel.bachelors &&
+                b2.classModel.level == EducationLevel.bachelors &&
+                a2.teacher.id != b2.teacher.id;
             if ((a2.teacher.id.isNotEmpty && a2.teacher.id == b2.teacher.id) ||
-                a2.classModel.id == b2.classModel.id ||
+                (a2.classModel.id == b2.classModel.id && !bachelorParallel7) ||
                 (a2.hasRoom && b2.hasRoom && a2.roomId == b2.roomId)) {
               // Find actual _assignments indices (combinedAssignments may include synthetics)
               final idxA = _assignments.indexWhere((x) => x.id == a2.id);
@@ -3666,8 +3851,12 @@ class DataEntryViewModel extends ChangeNotifier {
             final sh = a2.occupiedSlots.toSet().intersection(b2.occupiedSlots.toSet());
             if (sh.isEmpty) continue;
             if (isCombinedMatch(a2, b2)) continue;
+            final bachelorParallel8 = a2.classModel.id == b2.classModel.id &&
+                a2.classModel.level == EducationLevel.bachelors &&
+                b2.classModel.level == EducationLevel.bachelors &&
+                a2.teacher.id != b2.teacher.id;
             if ((a2.teacher.id.isNotEmpty && a2.teacher.id == b2.teacher.id) ||
-                a2.classModel.id == b2.classModel.id ||
+                (a2.classModel.id == b2.classModel.id && !bachelorParallel8) ||
                 (a2.hasRoom && b2.hasRoom && a2.roomId == b2.roomId)) {
               final idxA = _assignments.indexWhere((x) => x.id == a2.id);
               final idxB = _assignments.indexWhere((x) => x.id == b2.id);
@@ -4258,10 +4447,7 @@ class DataEntryViewModel extends ChangeNotifier {
 
     bool isCombinedMatch(Assignment a, Assignment b) {
       if (a.course.id != b.course.id) return false;
-      return _combinedRules.any((r) =>
-          r.courseId == a.course.id &&
-          r.classIds.contains(a.classModel.id) &&
-          r.classIds.contains(b.classModel.id));
+      return combinedRulesLinkClasses(_combinedRules, a.course.id, a.classModel.id, b.classModel.id);
     }
 
     // ── Clash pair scan (read-only, mirrors fixTeacherClashes detection) ─
@@ -4300,7 +4486,13 @@ class DataEntryViewModel extends ChangeNotifier {
           }
           addFallbacks(clash, sug, ordered);
           out[clash] = sug;
-        } else if (a.classModel.id == b.classModel.id) {
+        } else if (a.classModel.id == b.classModel.id &&
+            !(a.classModel.level == EducationLevel.bachelors &&
+              b.classModel.level == EducationLevel.bachelors)) {
+          // Bachelor-only exemption already ruled out same-teacher pairs
+          // above (this branch is reached only when teachers differ), so a
+          // same-class pair here that's both Bachelor is an allowed parallel
+          // session, not a clash — nothing to suggest.
           final clash = 'Class ${a.classModel.shortCode}: ${label(a)} ↔ '
               '${label(b)} on ${dayStr(sharedDays)}';
           final sug = <FixSuggestion>[];

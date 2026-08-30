@@ -2,6 +2,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:lucide_icons_flutter/lucide_icons.dart';
   import '../../viewmodels/settings_viewmodel.dart';
   import '../../viewmodels/theme_viewmodel.dart';
   import '../../viewmodels/data_entry_viewmodel.dart';
@@ -17,6 +18,7 @@ import 'package:google_fonts/google_fonts.dart';
   import '../../app_theme.dart';
   import '../../utils/responsive.dart';
   import '../widgets/selective_lock_dialog.dart';
+  import '../widgets/search_dropdown.dart';
 
 extension _StTh on BuildContext {
   bool  get _dk => Theme.of(this).brightness == Brightness.dark;
@@ -31,10 +33,14 @@ class SettingsScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final vm     = context.watch<SettingsViewModel>();
+    final vm      = context.watch<SettingsViewModel>();
     final themeVm = context.watch<ThemeViewModel>();
-    final hp     = context.hPad;
-    final isDark = context._dk;
+    final dataVm  = context.watch<DataEntryViewModel>();
+    final hp      = context.hPad;
+    final isDark  = context._dk;
+    final locked  = vm.scheduleLocked;
+    final hasRules = dataVm.timeSlotLocks.isNotEmpty || dataVm.combinedRules.isNotEmpty;
+    final canRun  = hasRules && !locked;
 
     return Scaffold(
       backgroundColor: Colors.transparent,
@@ -42,473 +48,768 @@ class SettingsScreen extends StatelessWidget {
         child: ConstrainedBox(
           constraints: const BoxConstraints(maxWidth: 900),
           child: ListView(
-            padding: EdgeInsets.fromLTRB(hp, 56, hp, 40),
+            padding: EdgeInsets.fromLTRB(hp, 44, hp, 40),
             children: [
 
-              // ── Header ─────────────────────────────────────────────────────
+              // ── Header ─────────────────────────────────────────────────
               Row(children: [
                 Container(width: 48, height: 48,
                   decoration: BoxDecoration(
-                    gradient: const LinearGradient(
-                        colors: [Color(0xFF6366F1), Color(0xFF4F46E5)]),
+                    gradient: AppTheme.tealGradient,
                     borderRadius: BorderRadius.circular(14),
-                    boxShadow: [BoxShadow(
-                        color: const Color(0xFF6366F1).withValues(alpha: .35),
+                    boxShadow: [BoxShadow(color: AppTheme.accentTeal.withValues(alpha: .4),
                         blurRadius: 18, offset: const Offset(0, 5))]),
-                  child: const Icon(Icons.settings_rounded, color: Colors.white, size: 24)),
+                  child: const Icon(LucideIcons.settings2, color: Colors.white, size: 24)),
                 const SizedBox(width: 16),
                 Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
                   Text('Settings', style: GoogleFonts.plusJakartaSans(
                       fontSize: 24, fontWeight: FontWeight.w800,
                       color: context._tp, letterSpacing: -0.5)),
-                  Text('Customise your timetable preferences',
+                  Text('The controls that matter most, up front',
                       style: GoogleFonts.plusJakartaSans(fontSize: 13, color: context._ts)),
                 ]),
               ]),
 
-              const SizedBox(height: 28),
+              const SizedBox(height: 24),
 
-              // ── Schedule Lock ───────────────────────────────────────────────
-              _card(context, child: Container(
-                decoration: BoxDecoration(
-                  borderRadius: BorderRadius.circular(14),
-                  gradient: vm.scheduleLocked
-                      ? LinearGradient(colors: [
-                          const Color(0xFFEF4444).withValues(alpha: .08),
-                          const Color(0xFFDC2626).withValues(alpha: .04),
-                        ])
-                      : null,
-                ),
-                child: Column(children: [
-                  _ToggleRow(
-                    icon: vm.scheduleLocked ? Icons.lock_rounded : Icons.lock_open_rounded,
-                    iconColor: vm.scheduleLocked ? const Color(0xFFEF4444) : context._ts,
-                    title: 'Schedule Lock',
-                    subtitle: vm.scheduleLocked
-                        ? 'Schedule is locked — no edits, GA or settings changes allowed'
-                        : 'Unlock — assignments and settings can be changed',
-                    value: vm.scheduleLocked,
-                    context: context,
-                    onChanged: (v) => vm.setScheduleLocked(v),
-                  ),
-                  if (!vm.scheduleLocked) ...[
-                    const SizedBox(height: 8),
-                    Divider(color: context._bd.withValues(alpha: .5), height: 1),
-                    InkWell(
-                      onTap: () {
-                        final dataVm = context.read<DataEntryViewModel>();
-                        showDialog(context: context, builder: (_) => SelectiveLockDialog(dataVm: dataVm));
-                      },
-                      child: Padding(
-                        padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 12),
-                        child: Row(children: [
-                          Container(
-                            padding: const EdgeInsets.all(6),
-                            decoration: BoxDecoration(
-                              color: AppTheme.accentAmber.withValues(alpha: .15),
-                              borderRadius: BorderRadius.circular(8),
-                            ),
-                            child: const Icon(Icons.lock_person_rounded, color: AppTheme.accentAmber, size: 16),
-                          ),
-                          const SizedBox(width: 12),
-                          Expanded(child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text('Customize Selective Locks', style: GoogleFonts.plusJakartaSans(fontSize: 13, fontWeight: FontWeight.w700, color: context._tp)),
-                              const SizedBox(height: 2),
-                              Text('Lock specific classes, programs, or levels to preserve their assignments', style: GoogleFonts.plusJakartaSans(fontSize: 11, color: context._ts)),
-                            ],
-                          )),
-                          Icon(Icons.chevron_right_rounded, color: context._ts, size: 18),
-                        ]),
-                      ),
-                    ),
-                  ],
-                  if (vm.scheduleLocked) ...[
-                    const SizedBox(height: 10),
-                    Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                      decoration: BoxDecoration(
-                        color: const Color(0xFFEF4444).withValues(alpha: .08),
-                        borderRadius: BorderRadius.circular(10),
-                        border: Border.all(color: const Color(0xFFEF4444).withValues(alpha: .3)),
-                      ),
-                      child: Row(children: [
-                        const Icon(Icons.shield_rounded, color: Color(0xFFEF4444), size: 14),
-                        const SizedBox(width: 8),
-                        Expanded(child: Text(
-                          'Running GA, adding/removing assignments, and changing constraints are all blocked.',
-                          style: GoogleFonts.plusJakartaSans(
-                            fontSize: 11, color: const Color(0xFFEF4444), height: 1.4),
-                        )),
-                      ]),
-                    ),
-                  ],
-                ]),
-              )),
+              // ── Hero: Schedule Lock ──────────────────────────────────────
+              _ScheduleLockHero(vm: vm),
 
-              const SizedBox(height: 20),
+              const SizedBox(height: 16),
 
-              // ── Appearance ─────────────────────────────────────────────────
-              _SectionLabel('Appearance', Icons.palette_rounded, AppTheme.accentBlue, context),
-              const SizedBox(height: 12),
-              _card(context, child: _ToggleRow(
-                icon: isDark ? Icons.dark_mode_rounded : Icons.light_mode_rounded,
-                iconColor: AppTheme.accentBlue,
-                title: 'Dark Mode',
-                subtitle: isDark ? 'Dark theme is active' : 'Light theme is active',
-                value: isDark,
-                context: context,
-                onChanged: (_) => themeVm.toggle(),
-              )),
-
-              const SizedBox(height: 20),
-
-              // ── Timetable Preferences ───────────────────────────────────────
-              _SectionLabel('Timetable Preferences', Icons.calendar_month_rounded,
-                  AppTheme.accentCyan, context),
-              const SizedBox(height: 12),
-              _card(context, child: Column(children: [
-                _SliderRow(
-                  icon: Icons.today_rounded,
-                  iconColor: AppTheme.accentCyan,
-                  title: 'Working Days per Week',
-                  subtitle: _dayRangeLabel(vm.workingDays),
-                  value: vm.workingDays.toDouble(),
+              // ── Two gradient stat-sliders ─────────────────────────────────
+              Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                _GradientStatSlider(
+                  icon: LucideIcons.calendarDays,
+                  gradient: const [AppTheme.accentCyan, Color(0xFF0891B2)],
+                  value: '${vm.workingDays}',
+                  label: 'WORKING DAYS / WEEK',
+                  sliderValue: vm.workingDays.toDouble(),
                   min: 5, max: 6, divisions: 1,
-                  color: AppTheme.accentCyan,
                   onChanged: (v) => vm.setWorkingDays(v.round()),
-                  context: context,
+                ),
+                const SizedBox(width: 14),
+                _GradientStatSlider(
+                  icon: LucideIcons.ruler,
+                  gradient: const [Color(0xFFF97316), Color(0xFFEA580C)],
+                  value: '${vm.workloadTolerance.toStringAsFixed(2)}h',
+                  label: 'BALANCED TOLERANCE',
+                  sliderValue: vm.workloadTolerance,
+                  min: 0, max: 3, divisions: 12,
+                  onChanged: (v) => vm.setWorkloadTolerance(v),
+                ),
+              ]),
+
+              const SizedBox(height: 16),
+
+              // ── List card: Dark Mode, Schedule Quality, 3 accordions ───────
+              _card(context, padding: EdgeInsets.zero, child: Column(children: [
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(18, 14, 18, 14),
+                  child: _ToggleRow(
+                    icon: isDark ? LucideIcons.moon : LucideIcons.sun,
+                    iconColor: AppTheme.accentCyan,
+                    title: 'Dark Mode',
+                    subtitle: isDark ? 'Dark theme is active' : 'Light theme is active',
+                    value: isDark,
+                    context: context,
+                    onChanged: (_) => themeVm.toggle(),
+                  ),
+                ),
+                Divider(color: context._bd, height: 1),
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(18, 14, 18, 16),
+                  child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                    Row(children: [
+                      Container(width: 34, height: 34,
+                          decoration: BoxDecoration(color: AppTheme.accentAmber.withValues(alpha: .12),
+                              borderRadius: BorderRadius.circular(10)),
+                          child: const Icon(LucideIcons.zap, size: 17, color: AppTheme.accentAmber)),
+                      const SizedBox(width: 14),
+                      Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                        Text('Schedule Quality', style: GoogleFonts.plusJakartaSans(
+                            fontSize: 13, fontWeight: FontWeight.w700, color: context._tp)),
+                        Text('Higher quality takes more time to generate', style: GoogleFonts.plusJakartaSans(
+                            fontSize: 11, color: context._ts)),
+                      ])),
+                    ]),
+                    const SizedBox(height: 12),
+                    Row(children: [
+                      _QualityChip('Fast',    50,  200, vm, context),
+                      const SizedBox(width: 8),
+                      _QualityChip('Normal',  300, 600, vm, context),
+                      const SizedBox(width: 8),
+                      _QualityChip('Best',    600, 1500, vm, context),
+                    ]),
+                  ]),
+                ),
+                Divider(color: context._bd, height: 1),
+                _CollapsibleSection(
+                  flush: true, showDivider: true,
+                  icon: LucideIcons.clock,
+                  label: 'Time Slot Constraints',
+                  color: locked ? const Color(0xFFEF4444) : AppTheme.accentAmber,
+                  badgeCount: dataVm.timeSlotLocks.length,
+                  lockedMessage: locked
+                      ? 'Schedule is locked. Unlock in settings to modify constraints.'
+                      : null,
+                  child: const _TimeSlotLocksSection(),
+                ),
+                _CollapsibleSection(
+                  flush: true, showDivider: true,
+                  icon: LucideIcons.link2,
+                  label: 'Combined Courses',
+                  color: locked ? const Color(0xFFEF4444) : AppTheme.accentBlue,
+                  badgeCount: dataVm.combinedRules.length,
+                  lockedMessage: locked
+                      ? 'Schedule is locked. Unlock in settings to modify combined courses.'
+                      : null,
+                  child: const _CombinedCoursesSection(),
+                ),
+                Builder(builder: (ctx) {
+                  final existingClassIds = dataVm.classes.map((c) => c.id).toSet();
+                  final activeShiftRules = dataVm.shiftRules
+                      .where((r) => existingClassIds.contains(r.classId)).length;
+                  return _CollapsibleSection(
+                    flush: true, showDivider: false,
+                    icon: LucideIcons.sunMoon,
+                    label: 'Manage Shifts',
+                    color: const Color(0xFFF97316),
+                    badgeCount: activeShiftRules,
+                    child: const _ManageShiftsSection(),
+                  );
+                }),
+              ])),
+
+              const SizedBox(height: 14),
+
+              // ── Re-Apply All Rules ─────────────────────────────────────────
+              GestureDetector(
+                onTap: canRun ? () {
+                  final moved = context.read<DataEntryViewModel>().reApplyAllRules();
+                  final msg = moved > 0
+                      ? 'Re-applied! $moved assignment${moved == 1 ? "" : "s"} updated.'
+                      : 'All assignments already satisfy the current rules.';
+                  final color = moved > 0 ? const Color(0xFF16A34A) : const Color(0xFF0284C7);
+                  _showStyledSnackBar(context, msg, color);
+                } : null,
+                child: AnimatedContainer(
+                  duration: const Duration(milliseconds: 200),
+                  height: 52,
+                  alignment: Alignment.center,
+                  decoration: BoxDecoration(
+                    borderRadius: BorderRadius.circular(14),
+                    gradient: canRun ? AppTheme.tealGradient : null,
+                    color: canRun ? null : const Color(0xFF6B7280).withValues(alpha: .15),
+                    boxShadow: canRun ? [BoxShadow(
+                        color: AppTheme.accentTeal.withValues(alpha: .35),
+                        blurRadius: 14, offset: const Offset(0, 5))] : null,
+                  ),
+                  child: Row(mainAxisSize: MainAxisSize.min, children: [
+                    Icon(LucideIcons.refreshCw, color: canRun ? Colors.white : Colors.grey, size: 17),
+                    const SizedBox(width: 8),
+                    Text('Re-Apply All Constraints & Combined Rules',
+                        style: GoogleFonts.plusJakartaSans(
+                            color: canRun ? Colors.white : Colors.grey,
+                            fontWeight: FontWeight.w700, fontSize: 13.5)),
+                  ]),
+                ),
+              ),
+
+              const SizedBox(height: 16),
+
+              // ── Sync to Student App ─────────────────────────────────────
+              Builder(builder: (ctx) {
+                final v = ctx.watch<DataEntryViewModel>();
+                final n = v.syncAll ? v.classes.length : v.syncClassIds.length;
+                return _CollapsibleSection(
+                  icon: LucideIcons.filter,
+                  label: 'Sync Selection',
+                  color: AppTheme.accentTeal,
+                  badgeCount: n,
+                  child: const _SyncSelectionSection(),
+                );
+              }),
+
+              const SizedBox(height: 14),
+
+              const _PublishCard(),
+
+              const SizedBox(height: 16),
+
+              // ── Account list card ───────────────────────────────────────
+              _card(context, padding: EdgeInsets.zero, child: Column(children: [
+                Builder(builder: (context) {
+                  final email = context.watch<AuthViewModel>().currentUser?.email;
+                  if (email == null) return const SizedBox.shrink();
+                  return Padding(
+                    padding: const EdgeInsets.fromLTRB(18, 16, 18, 14),
+                    child: Row(children: [
+                      Icon(LucideIcons.mail, size: 17, color: context._ts),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: Text(email,
+                            style: GoogleFonts.plusJakartaSans(
+                                fontSize: 13.5, fontWeight: FontWeight.w600,
+                                color: context._tp)),
+                      ),
+                    ]),
+                  );
+                }),
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(18, 0, 18, 16),
+                  child: Row(children: [
+                    Expanded(child: const _BackupBtn()),
+                    const SizedBox(width: 10),
+                    Expanded(child: const _RestoreBtn()),
+                  ]),
                 ),
               ])),
 
-              const SizedBox(height: 20),
+              const SizedBox(height: 10),
 
-              // ── Timetable Generation Speed ──────────────────────────────────
-              _SectionLabel('Generation Speed', Icons.speed_rounded,
-                  AppTheme.accentAmber, context),
-              const SizedBox(height: 12),
-              _card(context, child: Column(children: [
-                // Quality presets as simple chips
-                Row(children: [
-                  Expanded(child: Text('Schedule Quality',
-                      style: GoogleFonts.plusJakartaSans(
-                          fontSize: 13, fontWeight: FontWeight.w700,
-                          color: context._tp))),
-                ]),
-                const SizedBox(height: 4),
-                Text('Higher quality takes more time to generate',
-                    style: GoogleFonts.plusJakartaSans(
-                        fontSize: 11.5, color: context._ts)),
-                const SizedBox(height: 14),
-                Row(children: [
-                  _QualityChip('Fast',    50,  200, vm, context),
-                  const SizedBox(width: 8),
-                  _QualityChip('Normal',  300, 600, vm, context),
-                  const SizedBox(width: 8),
-                  _QualityChip('Best',    600, 1500, vm, context),
-                ]),
-              ])),
-
-              const SizedBox(height: 28),
-
-              // ── Time Slot Constraints (collapsible) ────────────────────────────
-              _CollapsibleSection(
-                icon: Icons.lock_clock_rounded,
-                label: 'Time Slot Constraints',
-                color: context.watch<SettingsViewModel>().scheduleLocked
-                    ? const Color(0xFFEF4444)
-                    : AppTheme.accentAmber,
-                badgeCount: context.watch<DataEntryViewModel>().timeSlotLocks.length,
-                lockedMessage: context.watch<SettingsViewModel>().scheduleLocked
-                    ? 'Schedule is locked. Unlock in settings to modify constraints.'
-                    : null,
-                child: const _TimeSlotLocksSection(),
-              ),
-
-              const SizedBox(height: 16),
-
-              // ── Combined Courses (collapsible) ─────────────────────────────────
-              _CollapsibleSection(
-                icon: Icons.link_rounded,
-                label: 'Combined Courses',
-                color: context.watch<SettingsViewModel>().scheduleLocked
-                    ? const Color(0xFFEF4444)
-                    : AppTheme.accentBlue,
-                badgeCount: context.watch<DataEntryViewModel>().combinedRules.length,
-                lockedMessage: context.watch<SettingsViewModel>().scheduleLocked
-                    ? 'Schedule is locked. Unlock in settings to modify combined courses.'
-                    : null,
-                child: const _CombinedCoursesSection(),
-              ),
-
-              const SizedBox(height: 16),
-
-              // ── Manage Shifts (collapsible) ────────────────────────────────────
-              Builder(builder: (ctx) {
-                final deVm = ctx.watch<DataEntryViewModel>();
-                final existingClassIds = deVm.classes.map((c) => c.id).toSet();
-                final activeShiftRules = deVm.shiftRules
-                    .where((r) => existingClassIds.contains(r.classId))
-                    .length;
-                return _CollapsibleSection(
-                  icon: Icons.wb_twilight_rounded,
-                  label: 'Manage Shifts',
-                  color: const Color(0xFFF97316),
-                  badgeCount: activeShiftRules,
-                  child: const _ManageShiftsSection(),
-                );
-              }),
-
-              const SizedBox(height: 20),
-
-              // ── Re-Apply All Rules ─────────────────────────────────────────────
-              Builder(builder: (ctx) {
-                final deVm = ctx.watch<DataEntryViewModel>();
-                final locked = ctx.watch<SettingsViewModel>().scheduleLocked;
-                final hasRules = deVm.timeSlotLocks.isNotEmpty || deVm.combinedRules.isNotEmpty;
-                final canRun = hasRules && !locked;
-                return GestureDetector(
-                  onTap: canRun ? () {
-                    final moved = ctx.read<DataEntryViewModel>().reApplyAllRules();
-                    final msg = moved > 0
-                        ? 'Re-applied! $moved assignment${moved == 1 ? "" : "s"} updated.'
-                        : 'All assignments already satisfy the current rules.';
-                    final color = moved > 0 ? const Color(0xFF16A34A) : const Color(0xFF0284C7);
-                    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-                      content: Text(msg, style: GoogleFonts.plusJakartaSans(
-                          fontWeight: FontWeight.w600, color: Colors.white, fontSize: 13)),
-                      backgroundColor: color, behavior: SnackBarBehavior.floating,
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                      margin: const EdgeInsets.all(16), duration: const Duration(seconds: 5),
-                    ));
-                  } : null,
-                  child: AnimatedContainer(
-                    duration: const Duration(milliseconds: 200),
-                    height: 56,
-                    alignment: Alignment.center,
-                    decoration: BoxDecoration(
-                      borderRadius: BorderRadius.circular(16),
-                      gradient: canRun ? const LinearGradient(
-                          colors: [Color(0xFF7C3AED), Color(0xFF4F46E5)]) : null,
-                      color: canRun ? null : const Color(0xFF6B7280).withValues(alpha: .15),
-                      boxShadow: canRun ? [BoxShadow(
-                          color: const Color(0xFF7C3AED).withValues(alpha: .35),
-                          blurRadius: 14, offset: const Offset(0, 5))] : null,
-                    ),
-                    child: Row(mainAxisSize: MainAxisSize.min, children: [
-                      Icon(Icons.sync_rounded, color: canRun ? Colors.white : Colors.grey, size: 20),
-                      const SizedBox(width: 8),
-                      Text('Re-Apply All Constraints & Combined Rules',
-                          style: GoogleFonts.plusJakartaSans(
-                              color: canRun ? Colors.white : Colors.grey,
-                              fontWeight: FontWeight.w700, fontSize: 14)),
-                    ]),
-                  ),
-                );
-              }),
-
-              const SizedBox(height: 28),
-
-              // ── Account ───────────────────────────────────────────────────────
-              _SectionLabel('Account', Icons.manage_accounts_rounded,
-                  AppTheme.accentTeal, context),
-              const SizedBox(height: 12),
-              Builder(builder: (context) {
-                final email = context.watch<AuthViewModel>().currentUser?.email;
-                if (email == null) return const SizedBox.shrink();
-                return Container(
-                  width: double.infinity,
-                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-                  margin: const EdgeInsets.only(bottom: 12),
-                  decoration: BoxDecoration(
-                    color: context._bg,
-                    borderRadius: BorderRadius.circular(16),
-                    border: Border.all(color: context._bd, width: 1.2),
-                  ),
-                  child: Row(children: [
-                    Icon(Icons.email_rounded, size: 20, color: context._ts),
-                    const SizedBox(width: 10),
-                    Expanded(
-                      child: Text(email,
-                          style: GoogleFonts.plusJakartaSans(
-                              fontSize: 14, fontWeight: FontWeight.w600,
-                              color: context._tp)),
-                    ),
-                  ]),
-                );
-              }),
-              Row(
-                children: [
-                  Expanded(child: const _BackupBtn()),
-                  const SizedBox(width: 12),
-                  Expanded(child: const _RestoreBtn()),
-                ],
-              ),
-              const SizedBox(height: 12),
               GestureDetector(
                 onTap: () => context.read<AuthViewModel>().signOut(),
                 child: Container(
-                  height: 56,
+                  height: 52,
                   alignment: Alignment.center,
                   decoration: BoxDecoration(
-                    borderRadius: BorderRadius.circular(16),
+                    borderRadius: BorderRadius.circular(14),
                     gradient: const LinearGradient(colors: [Color(0xFFEF4444), Color(0xFFDC2626)]),
                     boxShadow: [BoxShadow(color: const Color(0xFFEF4444).withValues(alpha: .3), blurRadius: 12, offset: const Offset(0, 4))],
                   ),
                   child: Row(
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      const Icon(Icons.logout_rounded, color: Colors.white, size: 20),
+                      const Icon(LucideIcons.logOut, color: Colors.white, size: 17),
                       const SizedBox(width: 8),
                       Text('Sign Out',
                           style: GoogleFonts.plusJakartaSans(
-                              fontWeight: FontWeight.bold, fontSize: 14,
+                              fontWeight: FontWeight.bold, fontSize: 13.5,
                               color: Colors.white)),
                     ],
                   ),
                 ),
               ),
-              const SizedBox(height: 28),
 
-              // ── Reset ───────────────────────────────────────────────────────
-              Row(children: [
-                Expanded(
-                  child: GestureDetector(
-                    onTap: () => _confirmReset(context, vm),
-                    child: Container(
-                      height: 50,
-                      alignment: Alignment.center,
-                      decoration: BoxDecoration(
-                        borderRadius: BorderRadius.circular(14),
-                        border: Border.all(color: context._bd),
-                        color: context._bg,
-                      ),
-                      child: Text('Reset to Defaults',
-                          style: GoogleFonts.plusJakartaSans(
-                              fontWeight: FontWeight.w700, fontSize: 13,
-                              color: context._tp)),
-                    ),
-                  ),
+              const SizedBox(height: 20),
+
+              // ── Danger Zone ────────────────────────────────────────────
+              Container(
+                padding: const EdgeInsets.all(20),
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(16),
+                  border: Border.all(color: AppTheme.error.withValues(alpha: .3)),
+                  color: AppTheme.error.withValues(alpha: .04),
                 ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: GestureDetector(
-                    onTap: () => _confirmClearData(context),
-                    child: Container(
-                      height: 50,
-                      alignment: Alignment.center,
-                      decoration: BoxDecoration(
-                        borderRadius: BorderRadius.circular(14),
-                        border: Border.all(color: AppTheme.error.withValues(alpha: .4)),
-                        color: AppTheme.error.withValues(alpha: .05),
+                child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                  Row(children: [
+                    const Icon(LucideIcons.triangleAlert, size: 14, color: AppTheme.error),
+                    const SizedBox(width: 8),
+                    Text('DANGER ZONE', style: GoogleFonts.plusJakartaSans(
+                        fontSize: 11.5, fontWeight: FontWeight.w800, letterSpacing: .4, color: AppTheme.error)),
+                  ]),
+                  const SizedBox(height: 16),
+                  Row(children: [
+                    Expanded(
+                      child: GestureDetector(
+                        onTap: () => _confirmReset(context, vm),
+                        child: Container(
+                          height: 46,
+                          alignment: Alignment.center,
+                          decoration: BoxDecoration(
+                            borderRadius: BorderRadius.circular(12),
+                            border: Border.all(color: context._bd),
+                            color: context._bg,
+                          ),
+                          child: Text('Reset to Defaults',
+                              style: GoogleFonts.plusJakartaSans(
+                                  fontWeight: FontWeight.w700, fontSize: 13,
+                                  color: context._tp)),
+                        ),
                       ),
-                      child: Text('Clear All Data',
-                          style: GoogleFonts.plusJakartaSans(
-                              fontWeight: FontWeight.w700, fontSize: 13,
-                              color: AppTheme.error)),
                     ),
-                  ),
-                ),
-              ]),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: GestureDetector(
+                        onTap: () => _confirmClearData(context),
+                        child: Container(
+                          height: 46,
+                          alignment: Alignment.center,
+                          decoration: BoxDecoration(
+                            borderRadius: BorderRadius.circular(12),
+                            border: Border.all(color: AppTheme.error.withValues(alpha: .5)),
+                            color: AppTheme.error.withValues(alpha: .08),
+                          ),
+                          child: Text('Clear All Data',
+                              style: GoogleFonts.plusJakartaSans(
+                                  fontWeight: FontWeight.w700, fontSize: 13,
+                                  color: AppTheme.error)),
+                        ),
+                      ),
+                    ),
+                  ]),
+                ]),
+              ),
             ],
           ),
         ),
       ),
     );
   }
+}
 
-  static Widget _card(BuildContext ctx, {required Widget child}) => Container(
-    padding: const EdgeInsets.all(18),
-    decoration: BoxDecoration(
-      color: ctx._bg,
-      borderRadius: BorderRadius.circular(18),
-      border: Border.all(color: ctx._bd),
-      boxShadow: [BoxShadow(
-          color: Colors.black.withValues(alpha: ctx._dk ? .18 : .04),
-          blurRadius: 12, offset: const Offset(0, 4))],
-    ),
-    child: child,
-  );
+// ── Hero: Schedule Lock — dark card + one soft radial glow, matching the
+// Dashboard's own hero-banner treatment (the app's single most impactful
+// toggle earns the same visual weight as the Dashboard's headline card).
+class _ScheduleLockHero extends StatelessWidget {
+  final SettingsViewModel vm;
+  const _ScheduleLockHero({required this.vm});
 
-  static String _dayRangeLabel(int days) {
-    const ends = ['', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
-    return 'Mon – ${ends[days.clamp(1, 6)]}  ($days days)';
-  }
-
-  static void _confirmReset(BuildContext ctx, SettingsViewModel vm) {
-    showDialog(
-      context: ctx,
-      builder: (c) => AlertDialog(
-        backgroundColor: ctx._bg,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        title: Text('Reset to Defaults?', style: GoogleFonts.plusJakartaSans(
-            fontWeight: FontWeight.w800, color: ctx._tp)),
-        content: Text('All preferences will return to factory settings.',
-            style: GoogleFonts.plusJakartaSans(color: ctx._ts, fontSize: 13)),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(c),
-              child: Text('Cancel',
-                  style: GoogleFonts.plusJakartaSans(color: ctx._ts))),
-          TextButton(
-            onPressed: () { vm.resetToDefaults(); Navigator.pop(c); },
-            child: Text('Reset', style: GoogleFonts.plusJakartaSans(
-                color: AppTheme.error, fontWeight: FontWeight.w700)),
-          ),
-        ],
+  @override
+  Widget build(BuildContext context) {
+    final locked = vm.scheduleLocked;
+    final glow = locked ? AppTheme.error : AppTheme.success;
+    return Container(
+      padding: const EdgeInsets.all(22),
+      clipBehavior: Clip.antiAlias,
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(20),
+        color: const Color(0xFF12172A),
+        boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: .25),
+            blurRadius: 24, offset: const Offset(0, 10))],
       ),
-    );
-  }
-
-  static void _confirmClearData(BuildContext ctx) {
-    showDialog(
-      context: ctx,
-      builder: (c) => AlertDialog(
-        backgroundColor: ctx._bg,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        title: Text('Clear All Data?', style: GoogleFonts.plusJakartaSans(
-            fontWeight: FontWeight.w800, color: ctx._tp)),
-        content: Text('This will permanently delete all teachers, courses, classes, rooms, and assignments. Settings will not be changed. This action cannot be undone.',
-            style: GoogleFonts.plusJakartaSans(color: ctx._ts, fontSize: 13)),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(c),
-              child: Text('Cancel',
-                  style: GoogleFonts.plusJakartaSans(color: ctx._ts))),
-          TextButton(
-            onPressed: () { 
-              ctx.read<DataEntryViewModel>().clearAllData();
-              ctx.read<AllocatorViewModel>().clearSchedule();
-              Navigator.pop(c);
-              ScaffoldMessenger.of(ctx).showSnackBar(SnackBar(
-                content: Text('All data has been cleared', style: GoogleFonts.plusJakartaSans(color: Colors.white, fontWeight: FontWeight.w500)),
-                backgroundColor: AppTheme.accentTeal,
-                behavior: SnackBarBehavior.floating,
-              ));
-            },
-            child: Text('Clear Data', style: GoogleFonts.plusJakartaSans(
-                color: AppTheme.error, fontWeight: FontWeight.w700)),
-          ),
-        ],
-      ),
+      child: Stack(children: [
+        Positioned(top: -70, right: -70,
+            child: Container(width: 220, height: 220,
+                decoration: BoxDecoration(shape: BoxShape.circle,
+                    gradient: RadialGradient(colors: [
+                      glow.withValues(alpha: .4), glow.withValues(alpha: 0),
+                    ])))),
+        Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Row(children: [
+            Container(width: 44, height: 44,
+                decoration: BoxDecoration(
+                    color: Colors.white.withValues(alpha: .08),
+                    borderRadius: BorderRadius.circular(13),
+                    border: Border.all(color: Colors.white.withValues(alpha: .12))),
+                child: Icon(locked ? LucideIcons.lock : LucideIcons.lockOpen,
+                    color: Colors.white, size: 20)),
+            const SizedBox(width: 14),
+            Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Text('Schedule Lock', style: GoogleFonts.plusJakartaSans(
+                  fontSize: 16, fontWeight: FontWeight.w800, color: Colors.white)),
+              const SizedBox(height: 2),
+              Text(
+                locked
+                    ? 'Locked — no edits, GA or settings changes allowed'
+                    : 'Unlocked — assignments and settings can be changed',
+                style: GoogleFonts.plusJakartaSans(
+                    fontSize: 12, color: Colors.white.withValues(alpha: .6)),
+              ),
+            ])),
+            Switch(
+              value: locked,
+              onChanged: vm.setScheduleLocked,
+              activeThumbColor: Colors.white,
+              activeTrackColor: AppTheme.error,
+              inactiveThumbColor: Colors.white,
+              inactiveTrackColor: Colors.white.withValues(alpha: .2),
+            ),
+          ]),
+          const SizedBox(height: 14),
+          if (!locked)
+            GestureDetector(
+              onTap: () {
+                final dataVm = context.read<DataEntryViewModel>();
+                showDialog(context: context, builder: (_) => SelectiveLockDialog(dataVm: dataVm));
+              },
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
+                decoration: BoxDecoration(
+                    color: Colors.white.withValues(alpha: .08),
+                    borderRadius: BorderRadius.circular(99)),
+                child: Row(mainAxisSize: MainAxisSize.min, children: [
+                  Icon(LucideIcons.lockKeyhole, size: 13, color: Colors.white.withValues(alpha: .85)),
+                  const SizedBox(width: 7),
+                  Text('Customize Selective Locks', style: GoogleFonts.plusJakartaSans(
+                      fontSize: 11.5, fontWeight: FontWeight.w600, color: Colors.white.withValues(alpha: .85))),
+                  const SizedBox(width: 4),
+                  Icon(LucideIcons.chevronRight, size: 13, color: Colors.white.withValues(alpha: .6)),
+                ]),
+              ),
+            )
+          else
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
+              decoration: BoxDecoration(
+                  color: AppTheme.error.withValues(alpha: .18),
+                  borderRadius: BorderRadius.circular(10)),
+              child: Row(children: [
+                const Icon(LucideIcons.shield, color: Colors.white, size: 14),
+                const SizedBox(width: 8),
+                Expanded(child: Text(
+                  'Running GA, adding/removing assignments, and changing constraints are all blocked.',
+                  style: GoogleFonts.plusJakartaSans(
+                      fontSize: 11, color: Colors.white.withValues(alpha: .9), height: 1.4),
+                )),
+              ]),
+            ),
+        ]),
+      ]),
     );
   }
 }
 
-// ── Section label ─────────────────────────────────────────────────────────────
-class _SectionLabel extends StatelessWidget {
-  final String text; final IconData icon;
-  final Color color; final BuildContext ctx;
-  const _SectionLabel(this.text, this.icon, this.color, this.ctx);
+// ── Gradient stat-slider — bold colored card carrying its own live value
+// AND the control that changes it (Working Days / Balanced Tolerance).
+class _GradientStatSlider extends StatelessWidget {
+  final IconData icon;
+  final List<Color> gradient;
+  final String value, label;
+  final double sliderValue, min, max;
+  final int divisions;
+  final ValueChanged<double> onChanged;
+  const _GradientStatSlider({
+    required this.icon, required this.gradient, required this.value, required this.label,
+    required this.sliderValue, required this.min, required this.max, required this.divisions,
+    required this.onChanged,
+  });
+
   @override
-  Widget build(BuildContext context) => Row(children: [
-    Container(width: 30, height: 30,
+  Widget build(BuildContext context) => Expanded(
+    child: Container(
+      padding: const EdgeInsets.fromLTRB(16, 16, 16, 4),
+      decoration: BoxDecoration(
+        gradient: LinearGradient(colors: gradient, begin: Alignment.topLeft, end: Alignment.bottomRight),
+        borderRadius: BorderRadius.circular(16),
+        boxShadow: [BoxShadow(color: gradient.first.withValues(alpha: .3),
+            blurRadius: 12, offset: const Offset(0, 4))],
+      ),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, mainAxisSize: MainAxisSize.min, children: [
+        Container(width: 30, height: 30,
+            decoration: BoxDecoration(color: Colors.white.withValues(alpha: .2), borderRadius: BorderRadius.circular(9)),
+            child: Icon(icon, size: 15, color: Colors.white)),
+        const SizedBox(height: 12),
+        Text(value, style: GoogleFonts.plusJakartaSans(
+            fontSize: 22, fontWeight: FontWeight.w800, color: Colors.white)),
+        Text(label, style: GoogleFonts.plusJakartaSans(
+            fontSize: 9.5, fontWeight: FontWeight.w700, color: Colors.white.withValues(alpha: .85), letterSpacing: .3)),
+        SliderTheme(
+          data: SliderTheme.of(context).copyWith(
+            activeTrackColor: Colors.white,
+            inactiveTrackColor: Colors.white.withValues(alpha: .28),
+            thumbColor: Colors.white,
+            overlayColor: Colors.white.withValues(alpha: .15),
+            trackHeight: 3,
+            thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 6),
+          ),
+          child: Slider(
+            value: sliderValue.clamp(min, max),
+            min: min, max: max, divisions: divisions,
+            onChanged: onChanged,
+          ),
+        ),
+      ]),
+    ),
+  );
+}
+
+Widget _card(BuildContext ctx, {required Widget child, EdgeInsetsGeometry padding = const EdgeInsets.all(18)}) => Container(
+  padding: padding,
+  decoration: BoxDecoration(
+    color: ctx._bg,
+    borderRadius: BorderRadius.circular(18),
+    border: Border.all(color: ctx._bd),
+    boxShadow: [BoxShadow(
+        color: Colors.black.withValues(alpha: ctx._dk ? .18 : .04),
+        blurRadius: 12, offset: const Offset(0, 4))],
+  ),
+  child: child,
+);
+
+void _showStyledSnackBar(BuildContext context, String msg, Color color) {
+  ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+    content: Text(msg, style: GoogleFonts.plusJakartaSans(
+        fontWeight: FontWeight.w600, color: Colors.white, fontSize: 13)),
+    backgroundColor: color, behavior: SnackBarBehavior.floating,
+    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+    margin: const EdgeInsets.all(16), duration: const Duration(seconds: 4),
+  ));
+}
+
+// ── Sync Selection ─────────────────────────────────────────────────────────
+// Which classes get included the next time "Sync to Student App" runs.
+// Unchecking a class also drops any teacher/room from the published data
+// unless another still-selected class uses them — so an unused teacher or
+// an empty room never shows up in the student app.
+class _SyncSelectionSection extends StatelessWidget {
+  const _SyncSelectionSection();
+
+  @override
+  Widget build(BuildContext context) {
+    final vm = context.watch<DataEntryViewModel>();
+    final tp = context._tp;
+    final ts = context._ts;
+    final isDark = context._dk;
+
+    if (vm.classes.isEmpty) {
+      return Padding(
+        padding: const EdgeInsets.all(16),
+        child: Row(children: [
+          Icon(LucideIcons.info, size: 16, color: ts),
+          const SizedBox(width: 8),
+          Expanded(child: Text('No classes yet. Add classes in the Data tab first.',
+              style: GoogleFonts.plusJakartaSans(fontSize: 12, color: ts))),
+        ]),
+      );
+    }
+
+    final allClassIds = vm.classes.map((c) => c.id).toSet();
+    final selected = vm.syncAll ? allClassIds : vm.syncClassIds;
+
+    void apply(Set<String> next) {
+      if (next.length == allClassIds.length) {
+        vm.setSyncSelection(syncAll: true, classIds: const {});
+      } else {
+        vm.setSyncSelection(syncAll: false, classIds: next);
+      }
+    }
+
+    final byProgram = <String, List<ClassModel>>{};
+    for (final c in vm.classes) {
+      final progName = vm.programs.where((p) => p.id == c.programId).firstOrNull?.name ?? 'Other';
+      byProgram.putIfAbsent(progName, () => []).add(c);
+    }
+
+    return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+      Container(
+        margin: const EdgeInsets.only(bottom: 14),
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
         decoration: BoxDecoration(
-            color: color.withValues(alpha: .12), borderRadius: BorderRadius.circular(8)),
-        child: Icon(icon, size: 16, color: color)),
-    const SizedBox(width: 10),
-    Text(text, style: GoogleFonts.plusJakartaSans(
-        fontWeight: FontWeight.w800, fontSize: 14, color: ctx._tp)),
-  ]);
+          color: AppTheme.accentTeal.withValues(alpha: .08),
+          borderRadius: BorderRadius.circular(10),
+          border: Border.all(color: AppTheme.accentTeal.withValues(alpha: .25)),
+        ),
+        child: Row(children: [
+          const Icon(LucideIcons.info, size: 14, color: AppTheme.accentTeal),
+          const SizedBox(width: 8),
+          Expanded(child: Text(
+            "Uncheck classes/sections you don't want students to see (e.g. unused or empty sections). "
+            "Their teachers and rooms are hidden too, unless another selected class still uses them.",
+            style: GoogleFonts.plusJakartaSans(fontSize: 11, color: AppTheme.accentTeal, height: 1.5),
+          )),
+        ]),
+      ),
+      Row(children: [
+        Text('${selected.length} of ${allClassIds.length} selected',
+            style: GoogleFonts.plusJakartaSans(fontSize: 11.5, fontWeight: FontWeight.w600, color: ts)),
+        const Spacer(),
+        GestureDetector(
+          onTap: () => apply(allClassIds),
+          child: Text('Select All',
+              style: GoogleFonts.plusJakartaSans(fontSize: 11.5, fontWeight: FontWeight.w700, color: AppTheme.accentTeal)),
+        ),
+      ]),
+      const SizedBox(height: 10),
+      for (final entry in byProgram.entries)
+        Builder(builder: (_) {
+          final progClasses = entry.value..sort((a, b) => a.name.compareTo(b.name));
+          final progIds = progClasses.map((c) => c.id).toSet();
+          final allIn = progIds.every(selected.contains);
+          final someIn = !allIn && progIds.any(selected.contains);
+
+          void toggleProgram() {
+            final next = {...selected};
+            allIn ? next.removeAll(progIds) : next.addAll(progIds);
+            apply(next);
+          }
+
+          return Padding(
+            padding: const EdgeInsets.only(bottom: 12),
+            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              GestureDetector(
+                onTap: toggleProgram,
+                child: Row(children: [
+                  Icon(
+                    allIn ? Icons.check_box_rounded : someIn ? Icons.indeterminate_check_box_rounded : Icons.check_box_outline_blank_rounded,
+                    size: 16, color: (allIn || someIn) ? AppTheme.accentTeal : ts,
+                  ),
+                  const SizedBox(width: 6),
+                  Text(entry.key,
+                      style: GoogleFonts.plusJakartaSans(
+                          fontWeight: FontWeight.w700, fontSize: 12.5, color: (allIn || someIn) ? tp : ts)),
+                ]),
+              ),
+              const SizedBox(height: 6),
+              Wrap(spacing: 6, runSpacing: 6, children: progClasses.map((c) {
+                final isSel = selected.contains(c.id);
+                return GestureDetector(
+                  onTap: () {
+                    final next = {...selected};
+                    isSel ? next.remove(c.id) : next.add(c.id);
+                    apply(next);
+                  },
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                    decoration: BoxDecoration(
+                      color: isSel
+                          ? AppTheme.accentTeal.withValues(alpha: isDark ? .18 : .1)
+                          : (isDark ? AppTheme.bgCard : const Color(0xFFF1F5F9)),
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(color: isSel ? AppTheme.accentTeal.withValues(alpha: .4) : context._bd),
+                    ),
+                    child: Text(c.name,
+                        style: GoogleFonts.plusJakartaSans(
+                            fontSize: 11.5, fontWeight: FontWeight.w600, color: isSel ? AppTheme.accentTeal : ts)),
+                  ),
+                );
+              }).toList()),
+            ]),
+          );
+        }),
+    ]);
+  }
+}
+
+// ── Sync to Student App ───────────────────────────────────────────────────
+class _PublishCard extends StatefulWidget {
+  const _PublishCard();
+  @override
+  State<_PublishCard> createState() => _PublishCardState();
+}
+
+class _PublishCardState extends State<_PublishCard> {
+  DateTime? _lastPublished;
+  bool _loadingTs = true;
+  bool _publishing = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _refreshTimestamp();
+  }
+
+  Future<void> _refreshTimestamp() async {
+    final ts = await context.read<DataEntryViewModel>().lastPublishedAt();
+    if (!mounted) return;
+    setState(() { _lastPublished = ts; _loadingTs = false; });
+  }
+
+  String get _label {
+    if (_loadingTs) return 'Checking last sync…';
+    if (_lastPublished == null) return 'Never synced to the student app.';
+    final d = DateTime.now().difference(_lastPublished!);
+    final rel = d.inMinutes < 1 ? 'just now'
+        : d.inMinutes < 60 ? '${d.inMinutes} min ago'
+        : d.inHours < 24 ? '${d.inHours} h ago'
+        : '${d.inDays} d ago';
+    return 'Last synced: $rel';
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return _card(context, child: Row(children: [
+      Container(width: 34, height: 34,
+          decoration: BoxDecoration(color: AppTheme.accentTeal.withValues(alpha: .12),
+              borderRadius: BorderRadius.circular(10)),
+          child: const Icon(LucideIcons.smartphone, size: 17, color: AppTheme.accentTeal)),
+      const SizedBox(width: 14),
+      Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Text('Sync to Student App', style: GoogleFonts.plusJakartaSans(
+            fontSize: 13, fontWeight: FontWeight.w700, color: context._tp)),
+        Text(_label, style: GoogleFonts.plusJakartaSans(fontSize: 11, color: context._ts)),
+      ])),
+      const SizedBox(width: 10),
+      GestureDetector(
+        onTap: _publishing ? null : () async {
+          setState(() => _publishing = true);
+          try {
+            await context.read<DataEntryViewModel>().publishForStudents();
+            if (!context.mounted) return;
+            _showStyledSnackBar(context, 'Timetable synced to the student app!', AppTheme.success);
+            await _refreshTimestamp();
+          } catch (e) {
+            if (!context.mounted) return;
+            _showStyledSnackBar(context, 'Sync failed: $e', AppTheme.error);
+          } finally {
+            if (mounted) setState(() => _publishing = false);
+          }
+        },
+        child: Container(
+          height: 38, padding: const EdgeInsets.symmetric(horizontal: 16),
+          alignment: Alignment.center,
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(10),
+            gradient: _publishing ? null : AppTheme.tealGradient,
+            color: _publishing ? const Color(0xFF6B7280).withValues(alpha: .15) : null,
+          ),
+          child: _publishing
+              ? const SizedBox(width: 16, height: 16,
+                  child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+              : Text('Sync Now', style: GoogleFonts.plusJakartaSans(
+                  fontWeight: FontWeight.w700, fontSize: 12.5, color: Colors.white)),
+        ),
+      ),
+    ]));
+  }
+}
+
+void _confirmReset(BuildContext ctx, SettingsViewModel vm) {
+  showDialog(
+    context: ctx,
+    builder: (c) => AlertDialog(
+      backgroundColor: ctx._bg,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+      title: Text('Reset to Defaults?', style: GoogleFonts.plusJakartaSans(
+          fontWeight: FontWeight.w800, color: ctx._tp)),
+      content: Text('All preferences will return to factory settings.',
+          style: GoogleFonts.plusJakartaSans(color: ctx._ts, fontSize: 13)),
+      actions: [
+        TextButton(onPressed: () => Navigator.pop(c),
+            child: Text('Cancel',
+                style: GoogleFonts.plusJakartaSans(color: ctx._ts))),
+        TextButton(
+          onPressed: () { vm.resetToDefaults(); Navigator.pop(c); },
+          child: Text('Reset', style: GoogleFonts.plusJakartaSans(
+              color: AppTheme.error, fontWeight: FontWeight.w700)),
+        ),
+      ],
+    ),
+  );
+}
+
+void _confirmClearData(BuildContext ctx) {
+  showDialog(
+    context: ctx,
+    builder: (c) => AlertDialog(
+      backgroundColor: ctx._bg,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+      title: Text('Clear All Data?', style: GoogleFonts.plusJakartaSans(
+          fontWeight: FontWeight.w800, color: ctx._tp)),
+      content: Text('This will permanently delete all teachers, courses, classes, rooms, and assignments. Settings will not be changed. This action cannot be undone.',
+          style: GoogleFonts.plusJakartaSans(color: ctx._ts, fontSize: 13)),
+      actions: [
+        TextButton(onPressed: () => Navigator.pop(c),
+            child: Text('Cancel',
+                style: GoogleFonts.plusJakartaSans(color: ctx._ts))),
+        TextButton(
+          onPressed: () {
+            ctx.read<DataEntryViewModel>().clearAllData();
+            ctx.read<AllocatorViewModel>().clearSchedule();
+            Navigator.pop(c);
+            ScaffoldMessenger.of(ctx).showSnackBar(SnackBar(
+              content: Text('All data has been cleared', style: GoogleFonts.plusJakartaSans(color: Colors.white, fontWeight: FontWeight.w500)),
+              backgroundColor: AppTheme.accentTeal,
+              behavior: SnackBarBehavior.floating,
+            ));
+          },
+          child: Text('Clear Data', style: GoogleFonts.plusJakartaSans(
+              color: AppTheme.error, fontWeight: FontWeight.w700)),
+        ),
+      ],
+    ),
+  );
 }
 
 // ── Toggle row ────────────────────────────────────────────────────────────────
@@ -539,53 +840,6 @@ class _ToggleRow extends StatelessWidget {
       thumbColor: WidgetStateProperty.resolveWith((s) => s.contains(WidgetState.selected) ? iconColor : null),
     ),
   ]);
-}
-
-// ── Slider row ────────────────────────────────────────────────────────────────
-class _SliderRow extends StatelessWidget {
-  final IconData icon; final Color iconColor, color;
-  final String title, subtitle;
-  final double value, min, max;
-  final int divisions;
-  final ValueChanged<double> onChanged;
-  final BuildContext context;
-  const _SliderRow({required this.icon, required this.iconColor,
-      required this.title, required this.subtitle, required this.value,
-      required this.min, required this.max, required this.divisions,
-      required this.color, required this.onChanged, required this.context});
-  @override
-  Widget build(BuildContext ctx) => Column(
-    crossAxisAlignment: CrossAxisAlignment.start,
-    children: [
-      Row(children: [
-        Container(width: 36, height: 36,
-            decoration: BoxDecoration(
-                color: iconColor.withValues(alpha: .1), borderRadius: BorderRadius.circular(10)),
-            child: Icon(icon, size: 18, color: iconColor)),
-        const SizedBox(width: 14),
-        Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          Text(title, style: GoogleFonts.plusJakartaSans(
-              fontSize: 13, fontWeight: FontWeight.w700, color: context._tp)),
-          Text(subtitle, style: GoogleFonts.plusJakartaSans(
-              fontSize: 11, color: context._ts)),
-        ])),
-      ]),
-      SliderTheme(
-        data: SliderTheme.of(ctx).copyWith(
-          activeTrackColor: color,
-          inactiveTrackColor: color.withValues(alpha: .15),
-          thumbColor: color,
-          overlayColor: color.withValues(alpha: .15),
-          trackHeight: 3,
-        ),
-        child: Slider(
-          value: value.clamp(min, max),
-          min: min, max: max, divisions: divisions,
-          onChanged: onChanged,
-        ),
-      ),
-    ],
-  );
 }
 
 // ── Quality chip preset ───────────────────────────────────────────────────────
@@ -628,6 +882,12 @@ class _CollapsibleSection extends StatefulWidget {
   final int badgeCount;
   final Widget child;
   final String? lockedMessage;
+  // When embedded inside a shared outer card (the Scheduling Rules category
+  // groups 3 of these into one card) this drops its own card chrome and
+  // relies on the parent's border/shadow instead — showDivider then draws
+  // the line separating it from the next accordion.
+  final bool flush;
+  final bool showDivider;
   const _CollapsibleSection({
     required this.icon,
     required this.label,
@@ -635,6 +895,8 @@ class _CollapsibleSection extends StatefulWidget {
     required this.badgeCount,
     required this.child,
     this.lockedMessage,
+    this.flush = false,
+    this.showDivider = false,
   });
   @override
   State<_CollapsibleSection> createState() => _CollapsibleSectionState();
@@ -673,7 +935,7 @@ class _CollapsibleSectionState extends State<_CollapsibleSection>
     final tp     = isDark ? AppTheme.textPrimary : AppTheme.lightText;
 
     return Container(
-      decoration: BoxDecoration(
+      decoration: widget.flush ? null : BoxDecoration(
         color: bg,
         borderRadius: BorderRadius.circular(18),
         border: Border.all(color: bd),
@@ -720,8 +982,8 @@ class _CollapsibleSectionState extends State<_CollapsibleSection>
                 // Animated chevron
                 RotationTransition(
                   turns: _rot,
-                  child: Icon(Icons.keyboard_arrow_down_rounded,
-                      color: widget.color, size: 22),
+                  child: Icon(LucideIcons.chevronDown,
+                      color: widget.color, size: 20),
                 ),
               ]),
             ),
@@ -744,7 +1006,7 @@ class _CollapsibleSectionState extends State<_CollapsibleSection>
                         border: Border.all(color: const Color(0xFFEF4444).withValues(alpha: .3)),
                       ),
                       child: Row(children: [
-                        const Icon(Icons.lock_rounded, color: Color(0xFFEF4444), size: 16),
+                        const Icon(LucideIcons.lock, color: Color(0xFFEF4444), size: 16),
                         const SizedBox(width: 10),
                         Expanded(child: Text(
                           widget.lockedMessage!,
@@ -767,6 +1029,7 @@ class _CollapsibleSectionState extends State<_CollapsibleSection>
               ],
             ),
           ),
+          if (widget.flush && widget.showDivider) Divider(color: bd, height: 1),
         ],
       ),
     );
@@ -853,7 +1116,7 @@ class _TimeSlotLocksSectionState extends State<_TimeSlotLocksSection> {
               hint: 'Select Slot',
               value: _selSlot,
               items: availableSlots,
-              labelBuilder: (s) => 'P${s.period} (${s.startTime}-${s.endTime})',
+              labelBuilder: (s) => 'P${s.period} (${TimeSlot.format12(s.startTime)}-${TimeSlot.format12(s.endTime)})',
               onChanged: (v) => setState(() => _selSlot = v),
             ),
             
@@ -869,7 +1132,7 @@ class _TimeSlotLocksSectionState extends State<_TimeSlotLocksSection> {
                   className: cName,
                   level: _selLevel,
                   timeSlotId: _selSlot!.id,
-                  timeSlotLabel: 'P${_selSlot!.period} (${_selSlot!.startTime}-${_selSlot!.endTime})',
+                  timeSlotLabel: 'P${_selSlot!.period} (${TimeSlot.format12(_selSlot!.startTime)}-${TimeSlot.format12(_selSlot!.endTime)})',
                 );
                 final log = vm.addTimeSlotLock(lock);
                 setState(() { _selCourse = null; _selSlot = null; });
@@ -898,7 +1161,7 @@ class _TimeSlotLocksSectionState extends State<_TimeSlotLocksSection> {
                   margin: const EdgeInsets.all(16), duration: const Duration(seconds: 5),
                 ));
               },
-              icon: const Icon(Icons.add, size: 16, color: Colors.white),
+              icon: const Icon(LucideIcons.plus, size: 16, color: Colors.white),
               label: Text('Lock', style: GoogleFonts.plusJakartaSans(color: Colors.white, fontWeight: FontWeight.w700)),
               style: ElevatedButton.styleFrom(
                 backgroundColor: AppTheme.accentAmber,
@@ -935,7 +1198,7 @@ class _TimeSlotLocksSectionState extends State<_TimeSlotLocksSection> {
                   shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                 ));
               },
-              icon: const Icon(Icons.sync_rounded, size: 15),
+              icon: const Icon(LucideIcons.refreshCw, size: 15),
               label: Text('Fix Pinned Duplicates', style: GoogleFonts.plusJakartaSans(fontWeight: FontWeight.w700, fontSize: 12)),
             ),
           ],
@@ -963,7 +1226,7 @@ class _TimeSlotLocksSectionState extends State<_TimeSlotLocksSection> {
             ),
             child: Row(
               children: [
-                Icon(Icons.lock_rounded, size: 14, color: AppTheme.accentAmber),
+                Icon(LucideIcons.lock, size: 14, color: AppTheme.accentAmber),
                 const SizedBox(width: 10),
                 Expanded(
                   child: Text(
@@ -972,7 +1235,7 @@ class _TimeSlotLocksSectionState extends State<_TimeSlotLocksSection> {
                   ),
                 ),
                 IconButton(
-                  icon: Icon(Icons.close_rounded, size: 16, color: AppTheme.error),
+                  icon: Icon(LucideIcons.x, size: 16, color: AppTheme.error),
                   padding: EdgeInsets.zero,
                   constraints: const BoxConstraints(),
                   splashRadius: 16,
@@ -1006,7 +1269,7 @@ class _TimeSlotLocksSectionState extends State<_TimeSlotLocksSection> {
           value: value,
           hint: Text(hint, style: GoogleFonts.plusJakartaSans(fontSize: 12, color: context._ts)),
           dropdownColor: context._bg,
-          icon: Icon(Icons.arrow_drop_down, color: context._ts),
+          icon: Icon(LucideIcons.chevronDown, size: 16, color: context._ts),
           style: GoogleFonts.plusJakartaSans(fontSize: 13, color: context._tp, fontWeight: FontWeight.w500),
           items: items.map((item) => DropdownMenuItem<T>(
             value: item,
@@ -1043,7 +1306,7 @@ class _TimeSlotLocksSectionState extends State<_TimeSlotLocksSection> {
       menuHeight: 320,
       textStyle: GoogleFonts.plusJakartaSans(
           fontSize: 13, color: context._tp, fontWeight: FontWeight.w500),
-      trailingIcon: Icon(Icons.arrow_drop_down, color: context._ts),
+      trailingIcon: Icon(LucideIcons.chevronDown, size: 16, color: context._ts),
       inputDecorationTheme: InputDecorationTheme(
         isDense: true,
         contentPadding:
@@ -1079,10 +1342,112 @@ class _CombinedCoursesSectionState extends State<_CombinedCoursesSection> {
   Course? _selCourse;
   final Set<String> _selClassIds = {};
 
+  Widget _combineButton(BuildContext context, DataEntryViewModel vm) {
+    return ElevatedButton.icon(
+      onPressed: (_selCourse == null || _selClassIds.length < 2) ? null : () {
+        final rule = CombinedClassRule(
+          id: DateTime.now().microsecondsSinceEpoch.toString(),
+          courseId: _selCourse!.id,
+          classIds: _selClassIds.toList(),
+        );
+        final log = vm.addCombinedRule(rule);
+
+        // Rejected outright (no allocation yet, or a teacher mismatch) —
+        // nothing was saved, so leave the course/class selection as-is and
+        // just surface why, instead of clearing the form like a success.
+        if (log.isNotEmpty && log.first.startsWith('ERROR:')) {
+          ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+            content: Text(log.first.substring('ERROR: '.length),
+                style: GoogleFonts.plusJakartaSans(fontWeight: FontWeight.w600, color: Colors.white, fontSize: 13)),
+            backgroundColor: AppTheme.error,
+            behavior: SnackBarBehavior.floating,
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+            margin: const EdgeInsets.all(16),
+            duration: const Duration(seconds: 6),
+          ));
+          return;
+        }
+
+        setState(() { _selCourse = null; _selClassIds.clear(); });
+
+        // Show result snackbar
+        final mergedCount = log.where((l) => l.startsWith('Moved') || l.startsWith('Created')).length;
+        final skippedCount = log.where((l) => l.startsWith('Skipped')).length;
+
+        String msg;
+        Color color;
+        if (mergedCount > 0 && skippedCount == 0) {
+          msg = '✅ Combined! $mergedCount assignment${mergedCount == 1 ? '' : 's'} automatically aligned to a shared slot.';
+          color = const Color(0xFF16A34A);
+        } else if (mergedCount > 0 && skippedCount > 0) {
+          msg = '⚠️ Partially combined — $mergedCount aligned, $skippedCount skipped (slot clash in sibling class).';
+          color = const Color(0xFFD97706);
+        } else if (skippedCount > 0) {
+          msg = '⚠️ Rule saved, but could not auto-align: slot already occupied in combined classes. '
+              'Run GA to resolve automatically.';
+          color = const Color(0xFFD97706);
+        } else {
+          msg = '✅ Combined course rule saved. Run GA to assign a shared slot.';
+          color = const Color(0xFF16A34A);
+        }
+
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text(msg,
+              style: GoogleFonts.plusJakartaSans(
+                  fontWeight: FontWeight.w600, color: Colors.white, fontSize: 13)),
+          backgroundColor: color,
+          behavior: SnackBarBehavior.floating,
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+          margin: const EdgeInsets.all(16),
+          duration: const Duration(seconds: 5),
+        ));
+      },
+      icon: const Icon(LucideIcons.plus, size: 16, color: Colors.white),
+      label: Text('Combine', style: GoogleFonts.plusJakartaSans(color: Colors.white, fontWeight: FontWeight.w700)),
+      style: ElevatedButton.styleFrom(
+        backgroundColor: AppTheme.accentBlue,
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+        elevation: 0,
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final vm = context.watch<DataEntryViewModel>();
     final isDark = context._dk;
+
+    // Course list is grouped Intermediate-then-Bachelor (level tagged in the
+    // label) so the two don't blur together in search; picking a course
+    // scopes the class picker to that same level — same pattern the
+    // Allocator's Class/Course fields already use.
+    final sortedCourses = vm.courses.toList()
+      ..sort((a, b) {
+        final lv = a.level.index.compareTo(b.level.index);
+        return lv != 0 ? lv : a.name.compareTo(b.name);
+      });
+    final classesForCourse = _selCourse == null
+        ? const <ClassModel>[]
+        : vm.classes.where((c) => c.level == _selCourse!.level).toList();
+
+    final courseField = SearchDropdown<Course>(
+      label: 'Search Course',
+      icon: LucideIcons.bookOpen,
+      value: _selCourse,
+      color: AppTheme.accentBlue,
+      items: sortedCourses,
+      itemLabel: (c) => '${c.name} · ${c.level.label}',
+      onChanged: (v) => setState(() { _selCourse = v; _selClassIds.clear(); }),
+    );
+    final classField = _ClassMultiSelectField(
+      classes: classesForCourse,
+      vm: vm,
+      enabled: _selCourse != null,
+      selectedIds: _selClassIds,
+      onChanged: (ids) => setState(() { _selClassIds..clear()..addAll(ids); }),
+    );
+    final addBtn = _combineButton(context, vm);
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -1093,144 +1458,35 @@ class _CombinedCoursesSectionState extends State<_CombinedCoursesSection> {
         Text('Merge multiple classes into a single GA timeslot', style: GoogleFonts.plusJakartaSans(
             fontSize: 11, color: context._ts)),
         const SizedBox(height: 12),
-        
-        // Form
-        Wrap(
-          spacing: 12,
-          runSpacing: 12,
-          crossAxisAlignment: WrapCrossAlignment.center,
-          children: [
-            // Course
-            Container(
-              height: 44,
-              padding: const EdgeInsets.symmetric(horizontal: 12),
-              decoration: BoxDecoration(
-                color: isDark ? const Color(0xFF1E1E26) : Colors.white,
-                borderRadius: BorderRadius.circular(8),
-                border: Border.all(color: context._bd),
-              ),
-              child: DropdownButtonHideUnderline(
-                child: DropdownButton<Course>(
-                  value: _selCourse,
-                  hint: Text('Select Course', style: GoogleFonts.plusJakartaSans(fontSize: 12, color: context._ts)),
-                  dropdownColor: context._bg,
-                  icon: Icon(Icons.arrow_drop_down, color: context._ts),
-                  style: GoogleFonts.plusJakartaSans(fontSize: 13, color: context._tp, fontWeight: FontWeight.w500),
-                  items: vm.courses.map((c) => DropdownMenuItem<Course>(
-                    value: c,
-                    child: Text(c.name),
-                  )).toList(),
-                  onChanged: (v) => setState(() { _selCourse = v; _selClassIds.clear(); }),
-                ),
-              ),
-            ),
-            
-            // Classes Checkbox Dropdown
-            if (_selCourse != null)
-              Container(
-                height: 44,
-                padding: const EdgeInsets.symmetric(horizontal: 12),
-                decoration: BoxDecoration(
-                  color: isDark ? const Color(0xFF1E1E26) : Colors.white,
-                  borderRadius: BorderRadius.circular(8),
-                  border: Border.all(color: context._bd),
-                ),
-                child: DropdownButtonHideUnderline(
-                  child: DropdownButton<String>(
-                    value: null,
-                    hint: Text('${_selClassIds.length} Classes Selected', style: GoogleFonts.plusJakartaSans(fontSize: 12, color: _selClassIds.isNotEmpty ? AppTheme.accentBlue : context._ts)),
-                    dropdownColor: context._bg,
-                    icon: Icon(Icons.arrow_drop_down, color: context._ts),
-                    items: vm.classes.map((c) {
-                      final progName = vm.programs.where((p) => p.id == c.programId).firstOrNull?.name ?? 'Unknown';
-                      final formattedName = '$progName - ${c.name}';
-                      final isSelected = _selClassIds.contains(c.id);
-                      return DropdownMenuItem<String>(
-                        value: c.id,
-                        child: Row(
-                          children: [
-                            Icon(isSelected ? Icons.check_box_rounded : Icons.check_box_outline_blank_rounded, color: isSelected ? AppTheme.accentBlue : context._ts, size: 18),
-                            const SizedBox(width: 8),
-                            Text(formattedName, style: GoogleFonts.plusJakartaSans(fontSize: 13, color: context._tp)),
-                          ],
-                        ),
-                      );
-                    }).toList(),
-                    onChanged: (val) {
-                      if (val != null) {
-                        setState(() {
-                          if (_selClassIds.contains(val)) { _selClassIds.remove(val); }
-                          else { _selClassIds.add(val); }
-                        });
-                      }
-                    },
-                  ),
-                ),
-              ),
-            
-            // Add Button
-            ElevatedButton.icon(
-              onPressed: (_selCourse == null || _selClassIds.length < 2) ? null : () {
-                final rule = CombinedClassRule(
-                  id: DateTime.now().microsecondsSinceEpoch.toString(),
-                  courseId: _selCourse!.id,
-                  classIds: _selClassIds.toList(),
-                );
-                final log = vm.addCombinedRule(rule);
-                setState(() { _selCourse = null; _selClassIds.clear(); });
 
-                // Show result snackbar
-                final mergedCount = log.where((l) => l.startsWith('Moved') || l.startsWith('Created')).length;
-                final skippedCount = log.where((l) => l.startsWith('Skipped')).length;
+        LayoutBuilder(builder: (_, box) {
+          final wide = box.maxWidth > 720;
+          if (wide) {
+            return Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Expanded(child: courseField),
+              const SizedBox(width: 12),
+              Expanded(child: classField),
+              const SizedBox(width: 12),
+              Padding(padding: const EdgeInsets.only(top: 4), child: addBtn),
+            ]);
+          }
+          return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            courseField,
+            const SizedBox(height: 12),
+            classField,
+            const SizedBox(height: 12),
+            addBtn,
+          ]);
+        }),
 
-                String msg;
-                Color color;
-                if (mergedCount > 0 && skippedCount == 0) {
-                  msg = '✅ Combined! $mergedCount assignment${mergedCount == 1 ? '' : 's'} automatically aligned to a shared slot.';
-                  color = const Color(0xFF16A34A);
-                } else if (mergedCount > 0 && skippedCount > 0) {
-                  msg = '⚠️ Partially combined — $mergedCount aligned, $skippedCount skipped (slot clash in sibling class).';
-                  color = const Color(0xFFD97706);
-                } else if (skippedCount > 0) {
-                  msg = '⚠️ Rule saved, but could not auto-align: slot already occupied in combined classes. '
-                      'Run GA to resolve automatically.';
-                  color = const Color(0xFFD97706);
-                } else {
-                  msg = '✅ Combined course rule saved. Run GA to assign a shared slot.';
-                  color = const Color(0xFF16A34A);
-                }
-
-                ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-                  content: Text(msg,
-                      style: GoogleFonts.plusJakartaSans(
-                          fontWeight: FontWeight.w600, color: Colors.white, fontSize: 13)),
-                  backgroundColor: color,
-                  behavior: SnackBarBehavior.floating,
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                  margin: const EdgeInsets.all(16),
-                  duration: const Duration(seconds: 5),
-                ));
-              },
-              icon: const Icon(Icons.add, size: 16, color: Colors.white),
-              label: Text('Combine', style: GoogleFonts.plusJakartaSans(color: Colors.white, fontWeight: FontWeight.w700)),
-              style: ElevatedButton.styleFrom(
-                backgroundColor: AppTheme.accentBlue,
-                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-                elevation: 0,
-              ),
-            ),
-          ],
-        ),
-        
         const SizedBox(height: 24),
         Divider(color: context._bd, height: 1),
         const SizedBox(height: 16),
-        
+
         Text('Active Combinations', style: GoogleFonts.plusJakartaSans(
             fontWeight: FontWeight.w700, fontSize: 13, color: context._tp)),
         const SizedBox(height: 12),
-        
+
         if (vm.combinedRules.isEmpty)
           Text('No combined courses configured.',
               style: GoogleFonts.plusJakartaSans(fontSize: 12, color: context._ts))
@@ -1243,7 +1499,7 @@ class _CombinedCoursesSectionState extends State<_CombinedCoursesSection> {
               final prog = vm.programs.where((p) => p.id == c.programId).firstOrNull?.name ?? 'Unknown';
               return '$prog - ${c.name}';
             }).join(', ');
-            
+
             return Container(
               margin: const EdgeInsets.only(bottom: 8),
               padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
@@ -1254,7 +1510,7 @@ class _CombinedCoursesSectionState extends State<_CombinedCoursesSection> {
               ),
               child: Row(
                 children: [
-                  Icon(Icons.link_rounded, size: 14, color: AppTheme.accentBlue),
+                  Icon(LucideIcons.link2, size: 14, color: AppTheme.accentBlue),
                   const SizedBox(width: 10),
                   Expanded(
                     child: Text(
@@ -1263,7 +1519,7 @@ class _CombinedCoursesSectionState extends State<_CombinedCoursesSection> {
                     ),
                   ),
                   IconButton(
-                    icon: Icon(Icons.close_rounded, size: 16, color: AppTheme.error),
+                    icon: Icon(LucideIcons.x, size: 16, color: AppTheme.error),
                     padding: EdgeInsets.zero,
                     constraints: const BoxConstraints(),
                     splashRadius: 16,
@@ -1278,6 +1534,154 @@ class _CombinedCoursesSectionState extends State<_CombinedCoursesSection> {
   }
 }
 
+// Combined Courses' class multi-select: search + checkbox list opened from a
+// text-field-styled tappable box, matching SearchDropdown's look. Unlike
+// SearchDropdown this stays open across multiple picks, so it's its own
+// small dialog rather than an Autocomplete (which closes on first select).
+class _ClassMultiSelectField extends StatelessWidget {
+  final List<ClassModel> classes;
+  final DataEntryViewModel vm;
+  final bool enabled;
+  final Set<String> selectedIds;
+  final ValueChanged<Set<String>> onChanged;
+  const _ClassMultiSelectField({
+    required this.classes, required this.vm, required this.enabled,
+    required this.selectedIds, required this.onChanged,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final isDark = context._dk;
+    final label = !enabled
+        ? 'Select a course first'
+        : selectedIds.isEmpty
+            ? 'Search classes'
+            : '${selectedIds.length} class${selectedIds.length == 1 ? '' : 'es'} selected';
+
+    return InkWell(
+      borderRadius: BorderRadius.circular(14),
+      onTap: enabled ? () => showDialog(
+        context: context,
+        builder: (_) => _ClassPickerDialog(classes: classes, vm: vm, selectedIds: selectedIds, onChanged: onChanged),
+      ) : null,
+      child: InputDecorator(
+        decoration: InputDecoration(
+          labelText: 'Classes',
+          labelStyle: GoogleFonts.plusJakartaSans(color: context._ts, fontSize: 12),
+          prefixIcon: Icon(LucideIcons.users, color: context._ts, size: 18),
+          suffixIcon: Icon(LucideIcons.search, color: context._ts, size: 18),
+          filled: true, fillColor: isDark ? AppTheme.bgMid : const Color(0xFFF8FAFC),
+          border: OutlineInputBorder(borderRadius: BorderRadius.circular(14), borderSide: BorderSide(color: context._bd)),
+          enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(14), borderSide: BorderSide(color: context._bd)),
+          contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
+        ),
+        child: Text(label, style: GoogleFonts.plusJakartaSans(
+            fontSize: 14, color: selectedIds.isNotEmpty ? AppTheme.accentBlue : context._tp)),
+      ),
+    );
+  }
+}
+
+class _ClassPickerDialog extends StatefulWidget {
+  final List<ClassModel> classes;
+  final DataEntryViewModel vm;
+  final Set<String> selectedIds;
+  final ValueChanged<Set<String>> onChanged;
+  const _ClassPickerDialog({
+    required this.classes, required this.vm, required this.selectedIds, required this.onChanged,
+  });
+  @override
+  State<_ClassPickerDialog> createState() => _ClassPickerDialogState();
+}
+
+class _ClassPickerDialogState extends State<_ClassPickerDialog> {
+  late final Set<String> _selected = {...widget.selectedIds};
+  String _query = '';
+
+  @override
+  Widget build(BuildContext context) {
+    final filtered = widget.classes.where((c) {
+      if (_query.isEmpty) return true;
+      final prog = widget.vm.programs.where((p) => p.id == c.programId).firstOrNull?.name ?? '';
+      return '$prog ${c.name}'.toLowerCase().contains(_query.toLowerCase());
+    }).toList();
+
+    return Dialog(
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+      child: ConstrainedBox(
+        constraints: BoxConstraints(maxWidth: 420, maxHeight: MediaQuery.of(context).size.height * 0.7),
+        child: Padding(
+          padding: const EdgeInsets.all(16),
+          child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Row(children: [
+              Text('Select Classes', style: GoogleFonts.plusJakartaSans(fontWeight: FontWeight.w800, fontSize: 15, color: context._tp)),
+              const Spacer(),
+              if (_selected.isNotEmpty)
+                GestureDetector(
+                  onTap: () => setState(() => _selected.clear()),
+                  child: Text('Clear', style: GoogleFonts.plusJakartaSans(fontSize: 12, fontWeight: FontWeight.w700, color: AppTheme.accentBlue)),
+                ),
+            ]),
+            const SizedBox(height: 12),
+            TextField(
+              autofocus: true,
+              onChanged: (v) => setState(() => _query = v),
+              style: GoogleFonts.plusJakartaSans(fontSize: 13, color: context._tp),
+              decoration: InputDecoration(
+                hintText: 'Search class or program…',
+                hintStyle: GoogleFonts.plusJakartaSans(fontSize: 12, color: context._ts),
+                prefixIcon: Icon(LucideIcons.search, size: 16, color: context._ts),
+                isDense: true,
+                filled: true, fillColor: context._dk ? AppTheme.bgMid : const Color(0xFFF8FAFC),
+                border: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: BorderSide(color: context._bd)),
+                enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: BorderSide(color: context._bd)),
+                focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: const BorderSide(color: AppTheme.accentBlue, width: 1.5)),
+                contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+              ),
+            ),
+            const SizedBox(height: 10),
+            Flexible(
+              child: filtered.isEmpty
+                  ? Padding(
+                      padding: const EdgeInsets.symmetric(vertical: 24),
+                      child: Text('No matches', style: GoogleFonts.plusJakartaSans(fontSize: 12, color: context._ts)))
+                  : ListView.builder(
+                      shrinkWrap: true,
+                      itemCount: filtered.length,
+                      itemBuilder: (_, i) {
+                        final c = filtered[i];
+                        final prog = widget.vm.programs.where((p) => p.id == c.programId).firstOrNull?.name ?? 'Unknown';
+                        final isSel = _selected.contains(c.id);
+                        return InkWell(
+                          onTap: () => setState(() => isSel ? _selected.remove(c.id) : _selected.add(c.id)),
+                          child: Padding(
+                            padding: const EdgeInsets.symmetric(vertical: 8),
+                            child: Row(children: [
+                              Icon(isSel ? LucideIcons.checkSquare : LucideIcons.square, size: 16, color: isSel ? AppTheme.accentBlue : context._ts),
+                              const SizedBox(width: 10),
+                              Expanded(child: Text('$prog - ${c.name}', style: GoogleFonts.plusJakartaSans(fontSize: 13, color: context._tp))),
+                            ]),
+                          ),
+                        );
+                      },
+                    ),
+            ),
+            const SizedBox(height: 12),
+            Align(
+              alignment: Alignment.centerRight,
+              child: ElevatedButton(
+                onPressed: () { widget.onChanged(_selected); Navigator.pop(context); },
+                style: ElevatedButton.styleFrom(backgroundColor: AppTheme.accentBlue, shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8))),
+                child: Text('Done (${_selected.length})', style: GoogleFonts.plusJakartaSans(color: Colors.white, fontWeight: FontWeight.w700)),
+              ),
+            ),
+          ]),
+        ),
+      ),
+    );
+  }
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Manage Shifts Section
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1286,7 +1690,7 @@ class _ManageShiftsSection extends StatelessWidget {
   const _ManageShiftsSection();
 
   static const _morningColor = Color(0xFFF97316);
-  static const _eveningColor = Color(0xFF6366F1);
+  static const _eveningColor = AppTheme.accentBlue;
 
   @override
   Widget build(BuildContext context) {
@@ -1306,7 +1710,7 @@ class _ManageShiftsSection extends StatelessWidget {
       return Padding(
         padding: const EdgeInsets.all(16),
         child: Row(children: [
-          Icon(Icons.info_outline_rounded, size: 16, color: ts),
+          Icon(LucideIcons.info, size: 16, color: ts),
           const SizedBox(width: 8),
           Expanded(child: Text(
             'No Bachelors programs found. Add programs and classes in the Data tab first.',
@@ -1327,10 +1731,10 @@ class _ManageShiftsSection extends StatelessWidget {
           border: Border.all(color: _morningColor.withValues(alpha: .25)),
         ),
         child: Row(children: [
-          const Icon(Icons.info_outline_rounded, size: 14, color: _morningColor),
+          const Icon(LucideIcons.info, size: 14, color: _morningColor),
           const SizedBox(width: 8),
           Expanded(child: Text(
-            '☀️ Morning = P1–P3 (08:00–11:00)   🌙 Evening = P4–P6 (11:00–14:00)\n'
+            'Morning = P1–P3 (08:00–11:00)   Evening = P4–P6 (11:00–14:00)\n'
             'Unassigned classes are auto-split (first half → Morning, second half → Evening). '
             'Tap the active chip to revert a class to auto.',
             style: GoogleFonts.plusJakartaSans(fontSize: 11, color: _morningColor, height: 1.5),
@@ -1375,7 +1779,7 @@ class _ManageShiftsSection extends StatelessWidget {
                   const SizedBox(width: 10),
                   // Morning chip
                   _ShiftChip(
-                    label: 'Morning', emoji: '☀️',
+                    label: 'Morning', icon: LucideIcons.sun,
                     active: isMorning, activeColor: _morningColor,
                     isDark: isDark,
                     onTap: () {
@@ -1390,7 +1794,7 @@ class _ManageShiftsSection extends StatelessWidget {
                   const SizedBox(width: 6),
                   // Evening chip
                   _ShiftChip(
-                    label: 'Evening', emoji: '🌙',
+                    label: 'Evening', icon: LucideIcons.moon,
                     active: isEvening, activeColor: _eveningColor,
                     isDark: isDark,
                     onTap: () {
@@ -1416,13 +1820,14 @@ class _ManageShiftsSection extends StatelessWidget {
 }
 
 class _ShiftChip extends StatelessWidget {
-  final String label, emoji;
+  final String label;
+  final IconData icon;
   final bool active, isDark;
   final Color activeColor;
   final VoidCallback onTap;
 
   const _ShiftChip({
-    required this.label, required this.emoji,
+    required this.label, required this.icon,
     required this.active, required this.activeColor,
     required this.isDark, required this.onTap,
   });
@@ -1444,7 +1849,7 @@ class _ShiftChip extends StatelessWidget {
             color: active ? activeColor : Colors.transparent, width: 1.5),
         ),
         child: Row(mainAxisSize: MainAxisSize.min, children: [
-          Text(emoji, style: const TextStyle(fontSize: 12)),
+          Icon(icon, size: 12, color: active ? activeColor : ts),
           const SizedBox(width: 4),
           Text(label,
             style: GoogleFonts.plusJakartaSans(
@@ -1473,11 +1878,11 @@ class _BackupBtn extends StatelessWidget {
           await dataVm.exportBackup(settingsVm.toJson(),
               allocatorData: allocatorVm.exportBackupData());
           if (context.mounted) {
-            ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Backup saved successfully!')));
+            _showStyledSnackBar(context, 'Backup saved successfully!', AppTheme.success);
           }
         } catch (e) {
           if (context.mounted) {
-            ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Failed to save backup: $e')));
+            _showStyledSnackBar(context, 'Failed to save backup: $e', AppTheme.error);
           }
         }
       },
@@ -1491,7 +1896,7 @@ class _BackupBtn extends StatelessWidget {
           border: Border.all(color: col.withValues(alpha: .4), width: 1.2),
         ),
         child: Row(mainAxisSize: MainAxisSize.min, children: [
-          const Icon(Icons.download_rounded, size: 20, color: col),
+          const Icon(LucideIcons.download, size: 18, color: col),
           const SizedBox(width: 8),
           Text('Backup Data', style: GoogleFonts.plusJakartaSans(
               fontSize: 14, fontWeight: FontWeight.bold, color: col)),
@@ -1601,12 +2006,12 @@ class _RestoreBtn extends StatelessWidget {
           await _waitForQuiet(dataVm);
           closeProgress();
           if (context.mounted) {
-            ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Backup restored successfully!')));
+            _showStyledSnackBar(context, 'Backup restored successfully!', AppTheme.success);
           }
         } catch (e) {
           closeProgress();
           if (context.mounted) {
-            ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Failed to restore backup: $e')));
+            _showStyledSnackBar(context, 'Failed to restore backup: $e', AppTheme.error);
           }
         }
       },
@@ -1620,7 +2025,7 @@ class _RestoreBtn extends StatelessWidget {
           border: Border.all(color: col.withValues(alpha: .4), width: 1.2),
         ),
         child: Row(mainAxisSize: MainAxisSize.min, children: [
-          const Icon(Icons.restore_rounded, size: 20, color: col),
+          const Icon(LucideIcons.upload, size: 18, color: col),
           const SizedBox(width: 8),
           Text('Restore Data', style: GoogleFonts.plusJakartaSans(
               fontSize: 14, fontWeight: FontWeight.bold, color: col)),

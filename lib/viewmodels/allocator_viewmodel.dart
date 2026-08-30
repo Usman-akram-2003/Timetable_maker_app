@@ -272,7 +272,12 @@ class AllocatorViewModel extends ChangeNotifier {
       if (roomId.isNotEmpty && a.roomId == roomId) {
         return 'Room ${a.roomId} is occupied by "${a.course.code}" on $days';
       }
-      if (a.classModel.id == classModel.id) {
+      // Bachelor-only: a different teacher (guaranteed here — same-teacher
+      // already returned above) teaching a different course to the same
+      // class at the same time is an allowed parallel session.
+      final bachelorParallel = classModel.level == EducationLevel.bachelors &&
+          a.classModel.level == EducationLevel.bachelors;
+      if (a.classModel.id == classModel.id && !bachelorParallel) {
         return '${classModel.name} already has "${a.course.code}" on $days';
       }
     }
@@ -326,7 +331,12 @@ class AllocatorViewModel extends ChangeNotifier {
       if (roomId.isNotEmpty && a.roomId == roomId) {
         return '⚠️ This room is occupied by "${a.course.code}" on $dayStr.';
       }
-      if (a.classModel.id == classModel.id) {
+      // Bachelor-only: a different teacher (guaranteed here — same-teacher
+      // already returned above) teaching a different course to the same
+      // class at the same time is an allowed parallel session.
+      final bachelorParallel = classModel.level == EducationLevel.bachelors &&
+          a.classModel.level == EducationLevel.bachelors;
+      if (a.classModel.id == classModel.id && !bachelorParallel) {
         return '⚠️ ${classModel.name} already has "${a.course.code}" on $dayStr.';
       }
     }
@@ -357,13 +367,11 @@ class AllocatorViewModel extends ChangeNotifier {
         final shared = a.occupiedSlots.toSet().intersection(b.occupiedSlots.toSet());
         if (shared.isEmpty) continue;
         final days = shared.map((s) => dayNames[s - 1]).join(', ');
-        // Exempt combined-rule pairs: same course + both classes in a combine rule
-        if (a.course.id == b.course.id) {
-          final isCmb = combinedRules.any((r) =>
-              r.courseId == a.course.id &&
-              r.classIds.contains(a.classModel.id) &&
-              r.classIds.contains(b.classModel.id));
-          if (isCmb) continue;
+        // Exempt combined-rule pairs: same course + both classes combined,
+        // directly or transitively through a shared class across rules.
+        if (a.course.id == b.course.id &&
+            combinedRulesLinkClasses(combinedRules, a.course.id, a.classModel.id, b.classModel.id)) {
+          continue;
         }
         if (a.teacher.id == b.teacher.id) {
           clashes.add('Teacher clash: ${a.teacher.name} — "${a.course.name}" & "${b.course.name}" overlap on $days');
@@ -374,7 +382,12 @@ class AllocatorViewModel extends ChangeNotifier {
             rooms.any((r) => r.id == a.roomId)) {
           clashes.add('Room clash: Room ${_roomLabel(a.roomId, rooms)} — "${a.course.name}" & "${b.course.name}" overlap on $days');
         }
-        if (a.classModel.id == b.classModel.id) {
+        // Bachelor-only: two different courses, two different teachers, same
+        // class, same time — an allowed parallel session, not a clash.
+        final bachelorParallel = a.classModel.level == EducationLevel.bachelors &&
+            b.classModel.level == EducationLevel.bachelors &&
+            a.teacher.id != b.teacher.id;
+        if (a.classModel.id == b.classModel.id && !bachelorParallel) {
           clashes.add('Class clash: ${a.classModel.name} — "${a.course.name}" & "${b.course.name}" overlap on $days');
         }
       }
@@ -382,13 +395,20 @@ class AllocatorViewModel extends ChangeNotifier {
 
     _isGenerating = false;
 
+    // Apply regardless of clash status — screens (Matrix's header controls,
+    // level filter) key off hasSchedule/_allAssignments to decide whether
+    // there's anything to show at all, not whether it's clash-free. Skipping
+    // this on a clash used to leave _allAssignments empty (stale or never
+    // populated), which hid the Matrix screen's level filter, Transfers &
+    // Swap, Move Course and Export controls right when clashes needed fixing.
+    _applySchedule(assignments);
+
     if (clashes.isNotEmpty) {
       _lastError = clashes.join('\n');
       notifyListeners();
       return false;
     }
 
-    _applySchedule(assignments);
     notifyListeners();
     return true;
   }
@@ -419,6 +439,13 @@ class AllocatorViewModel extends ChangeNotifier {
   void purgeByClassIds(Set<String> classIds) {
     if (_allAssignments.isEmpty || classIds.isEmpty) return;
     _applySchedule(_allAssignments.where((a) => !classIds.contains(a.classModel.id)).toList());
+    _saveSchedule();
+    notifyListeners();
+  }
+
+  void purgeByTimeSlotId(String timeSlotId) {
+    if (_allAssignments.isEmpty) return;
+    _applySchedule(_allAssignments.where((a) => a.timeSlotId != timeSlotId).toList());
     _saveSchedule();
     notifyListeners();
   }
