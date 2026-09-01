@@ -235,6 +235,14 @@ class SettingsScreen extends StatelessWidget {
 
               const _PublishCard(),
 
+              const SizedBox(height: 14),
+
+              const _TimetableDocumentCard(),
+
+              const SizedBox(height: 14),
+
+              const _ServerStatusCard(),
+
               const SizedBox(height: 16),
 
               // ── Account list card ───────────────────────────────────────
@@ -752,6 +760,210 @@ class _PublishCardState extends State<_PublishCard> {
         ),
       ),
     ]));
+  }
+}
+
+// Uploads a PDF/Excel timetable document to Firebase Storage for the
+// student app to open — a separate, optional artifact alongside the
+// structured schedule data synced by _PublishCard above.
+class _TimetableDocumentCard extends StatefulWidget {
+  const _TimetableDocumentCard();
+  @override
+  State<_TimetableDocumentCard> createState() => _TimetableDocumentCardState();
+}
+
+class _TimetableDocumentCardState extends State<_TimetableDocumentCard> {
+  ({String name, DateTime uploadedAt, String? title})? _current;
+  bool _loading = true;
+  bool _busy = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _refresh();
+  }
+
+  Future<void> _refresh() async {
+    final doc = await context.read<DataEntryViewModel>().currentTimetableDocument();
+    if (!mounted) return;
+    setState(() { _current = doc; _loading = false; });
+  }
+
+  String get _label {
+    if (_loading) return 'Checking…';
+    if (_current == null) return 'No document uploaded yet.';
+    final d = DateTime.now().difference(_current!.uploadedAt);
+    final rel = d.inMinutes < 1 ? 'just now'
+        : d.inMinutes < 60 ? '${d.inMinutes} min ago'
+        : d.inHours < 24 ? '${d.inHours} h ago'
+        : '${d.inDays} d ago';
+    return '${_current!.name} · uploaded $rel';
+  }
+
+  Future<void> _editTitle() async {
+    final controller = TextEditingController(text: _current?.title ?? 'Timetable Document');
+    final result = await showDialog<String>(
+      context: context,
+      builder: (c) => AlertDialog(
+        backgroundColor: context._bg,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: Text('Card Title', style: GoogleFonts.plusJakartaSans(
+            fontWeight: FontWeight.w800, color: context._tp)),
+        content: TextField(
+          controller: controller,
+          autofocus: true,
+          style: GoogleFonts.plusJakartaSans(color: context._tp, fontSize: 14),
+          decoration: InputDecoration(
+            hintText: 'e.g. Datesheet',
+            hintStyle: GoogleFonts.plusJakartaSans(color: context._ts),
+            border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
+          ),
+          onSubmitted: (v) => Navigator.pop(c, v),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(c),
+              child: Text('Cancel', style: GoogleFonts.plusJakartaSans(color: context._ts))),
+          TextButton(
+            onPressed: () => Navigator.pop(c, controller.text),
+            child: Text('Save', style: GoogleFonts.plusJakartaSans(
+                color: AppTheme.accentTeal, fontWeight: FontWeight.w700)),
+          ),
+        ],
+      ),
+    );
+    if (result == null || !mounted) return;
+    await context.read<DataEntryViewModel>().setTimetableDocumentTitle(result);
+    if (!mounted) return;
+    _showStyledSnackBar(context, 'Card title updated.', AppTheme.success);
+    await _refresh();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return _card(context, child: Row(children: [
+      Container(width: 34, height: 34,
+          decoration: BoxDecoration(color: AppTheme.accentAmber.withValues(alpha: .12),
+              borderRadius: BorderRadius.circular(10)),
+          child: const Icon(LucideIcons.fileText, size: 17, color: AppTheme.accentAmber)),
+      const SizedBox(width: 14),
+      Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Text(_current?.title ?? 'Timetable Document', style: GoogleFonts.plusJakartaSans(
+            fontSize: 13, fontWeight: FontWeight.w700, color: context._tp)),
+        Text(_label, style: GoogleFonts.plusJakartaSans(fontSize: 11, color: context._ts),
+            maxLines: 1, overflow: TextOverflow.ellipsis),
+      ])),
+      const SizedBox(width: 6),
+      if (!_busy)
+        IconButton(
+          icon: Icon(LucideIcons.pencil, size: 15, color: context._ts),
+          tooltip: 'Edit card title',
+          onPressed: _editTitle,
+        ),
+      if (_current != null && !_busy)
+        IconButton(
+          icon: Icon(LucideIcons.trash2, size: 17, color: AppTheme.error),
+          tooltip: 'Remove',
+          onPressed: () async {
+            setState(() => _busy = true);
+            try {
+              await context.read<DataEntryViewModel>().removeTimetableDocument();
+              if (!context.mounted) return;
+              _showStyledSnackBar(context, 'Document removed.', AppTheme.success);
+              await _refresh();
+            } catch (e) {
+              if (!context.mounted) return;
+              _showStyledSnackBar(context, 'Failed to remove: $e', AppTheme.error);
+            } finally {
+              if (mounted) setState(() => _busy = false);
+            }
+          },
+        ),
+      GestureDetector(
+        onTap: _busy ? null : () async {
+          setState(() => _busy = true);
+          try {
+            final name = await context.read<DataEntryViewModel>().pickAndUploadTimetableDocument();
+            if (!context.mounted) return;
+            if (name != null) {
+              _showStyledSnackBar(context, '$name uploaded for students.', AppTheme.success);
+              await _refresh();
+            }
+          } catch (e) {
+            if (!context.mounted) return;
+            _showStyledSnackBar(context, 'Upload failed: $e', AppTheme.error);
+          } finally {
+            if (mounted) setState(() => _busy = false);
+          }
+        },
+        child: Container(
+          height: 38, padding: const EdgeInsets.symmetric(horizontal: 16),
+          alignment: Alignment.center,
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(10),
+            gradient: _busy ? null : AppTheme.tealGradient,
+            color: _busy ? const Color(0xFF6B7280).withValues(alpha: .15) : null,
+          ),
+          child: _busy
+              ? const SizedBox(width: 16, height: 16,
+                  child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+              : Text(_current == null ? 'Upload' : 'Replace', style: GoogleFonts.plusJakartaSans(
+                  fontWeight: FontWeight.w700, fontSize: 12.5, color: Colors.white)),
+        ),
+      ),
+    ]));
+  }
+}
+
+// ── Student App Status (maintenance-mode toggle) ────────────────────────────
+class _ServerStatusCard extends StatefulWidget {
+  const _ServerStatusCard();
+  @override
+  State<_ServerStatusCard> createState() => _ServerStatusCardState();
+}
+
+class _ServerStatusCardState extends State<_ServerStatusCard> {
+  bool? _enabled; // null = still loading
+
+  @override
+  void initState() {
+    super.initState();
+    context.read<DataEntryViewModel>().currentServerEnabled().then((v) {
+      if (mounted) setState(() => _enabled = v);
+    });
+  }
+
+  Future<void> _toggle(bool v) async {
+    final prev = _enabled;
+    setState(() => _enabled = v); // optimistic
+    try {
+      await context.read<DataEntryViewModel>().setServerEnabled(v);
+      if (!mounted) return;
+      _showStyledSnackBar(context,
+          v ? 'Student app is live again.' : 'Student app now shows "Under Maintenance".',
+          v ? AppTheme.success : AppTheme.accentAmber);
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _enabled = prev);
+      _showStyledSnackBar(context, 'Failed to update: $e', AppTheme.error);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final enabled = _enabled ?? true;
+    return _card(context, child: _ToggleRow(
+      icon: enabled ? LucideIcons.circleCheck : LucideIcons.circleAlert,
+      iconColor: enabled ? AppTheme.success : AppTheme.error,
+      title: 'Student App Status',
+      subtitle: _enabled == null
+          ? 'Checking…'
+          : enabled
+              ? 'Live — students can view schedules normally.'
+              : 'Under maintenance — students see a maintenance screen.',
+      value: enabled,
+      onChanged: _enabled == null ? null : _toggle,
+      context: context,
+    ));
   }
 }
 

@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:firebase_storage/firebase_storage.dart';
 import '../models/teacher.dart';
 import '../models/course.dart';
 import '../models/class_model.dart';
@@ -911,10 +912,25 @@ class DataEntryViewModel extends ChangeNotifier {
       electiveGroups: electiveGroups,
     );
     data['publishedAt'] = FieldValue.serverTimestamp();
-    await FirebaseFirestore.instance
-        .collection('public_timetable')
-        .doc('current')
-        .set(data);
+
+    // This write replaces the whole document (not a merge), which would
+    // silently wipe out the uploaded-document fields set by
+    // pickAndUploadTimetableDocument() and the admin-set fields below —
+    // carry them forward explicitly.
+    final docRef =
+        FirebaseFirestore.instance.collection('public_timetable').doc('current');
+    final existing = await docRef.get();
+    for (final key in [
+      'documentUrl', 'documentName', 'documentUploadedAt', 'documentTitle',
+      'serverEnabled',
+    ]) {
+      final v = existing.data()?[key];
+      if (v != null) data[key] = v;
+    }
+
+    await docRef.set(data);
+    // A Cloud Function watches this doc for publishedAt changes and pushes
+    // the "new timetable" notification — nothing else needed here.
   }
 
   /// Last time [publishForStudents] succeeded, or null if never published.
@@ -925,6 +941,112 @@ class DataEntryViewModel extends ChangeNotifier {
         .get();
     final ts = snap.data()?['publishedAt'];
     return ts is Timestamp ? ts.toDate() : null;
+  }
+
+  static String _documentContentType(String ext) => switch (ext) {
+        'pdf' => 'application/pdf',
+        'xlsx' =>
+          'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        'xls' => 'application/vnd.ms-excel',
+        _ => 'application/octet-stream',
+      };
+
+  /// The card title shown in the student app for the uploaded document
+  /// (e.g. "Datesheet" instead of the default "Timetable Document").
+  Future<void> setTimetableDocumentTitle(String title) async {
+    final trimmed = title.trim();
+    await FirebaseFirestore.instance.collection('public_timetable').doc('current').set({
+      if (trimmed.isEmpty) 'documentTitle': FieldValue.delete() else 'documentTitle': trimmed,
+    }, SetOptions(merge: true));
+  }
+
+  /// Maintenance-mode switch for the student app — when false, the app shows
+  /// a "Server Under Maintenance" screen instead of any schedule data.
+  Future<void> setServerEnabled(bool enabled) async {
+    await FirebaseFirestore.instance.collection('public_timetable').doc('current').set({
+      'serverEnabled': enabled,
+    }, SetOptions(merge: true));
+  }
+
+  /// Current maintenance-mode state, defaulting to enabled (true) if unset.
+  Future<bool> currentServerEnabled() async {
+    final snap = await FirebaseFirestore.instance
+        .collection('public_timetable')
+        .doc('current')
+        .get();
+    return (snap.data()?['serverEnabled'] as bool?) ?? true;
+  }
+
+  /// Lets the admin pick a PDF/Excel file and upload it to Firebase Storage
+  /// as the student app's downloadable timetable document. Independent of
+  /// [publishForStudents] — never touches schedule data. Returns the picked
+  /// file's name on success, or null if the picker was cancelled.
+  Future<String?> pickAndUploadTimetableDocument() async {
+    final result = await FilePicker.pickFiles(
+      dialogTitle: 'Select Timetable Document',
+      type: FileType.custom,
+      allowedExtensions: ['pdf', 'xlsx', 'xls'],
+    );
+    if (result == null || result.files.single.path == null) return null;
+
+    final fileName = result.files.single.name;
+    final ext = fileName.split('.').last.toLowerCase();
+    final bytes = await File(result.files.single.path!).readAsBytes();
+
+    // Clear any existing document at a different extension so switching
+    // file types doesn't leave an orphaned old file sitting in Storage.
+    for (final otherExt in ['pdf', 'xlsx', 'xls']) {
+      if (otherExt == ext) continue;
+      try {
+        await FirebaseStorage.instance
+            .ref('public_timetable/document.$otherExt')
+            .delete();
+      } catch (_) {} // fine if it never existed
+    }
+
+    final ref =
+        FirebaseStorage.instance.ref('public_timetable/document.$ext');
+    await ref.putData(bytes, SettableMetadata(contentType: _documentContentType(ext)));
+    final url = await ref.getDownloadURL();
+
+    await FirebaseFirestore.instance.collection('public_timetable').doc('current').set({
+      'documentUrl': url,
+      'documentName': fileName,
+      'documentUploadedAt': FieldValue.serverTimestamp(),
+    }, SetOptions(merge: true));
+
+    return fileName;
+  }
+
+  /// Removes the uploaded timetable document from Storage and clears its
+  /// reference on the public doc.
+  Future<void> removeTimetableDocument() async {
+    for (final ext in ['pdf', 'xlsx', 'xls']) {
+      try {
+        await FirebaseStorage.instance.ref('public_timetable/document.$ext').delete();
+      } catch (_) {}
+    }
+    await FirebaseFirestore.instance.collection('public_timetable').doc('current').set({
+      'documentUrl': FieldValue.delete(),
+      'documentName': FieldValue.delete(),
+      'documentUploadedAt': FieldValue.delete(),
+    }, SetOptions(merge: true));
+  }
+
+  /// Current document's name + upload time + card title, or null if none
+  /// uploaded. [title] is null when the admin hasn't customised it — callers
+  /// fall back to a default like "Timetable Document".
+  Future<({String name, DateTime uploadedAt, String? title})?>
+      currentTimetableDocument() async {
+    final snap = await FirebaseFirestore.instance
+        .collection('public_timetable')
+        .doc('current')
+        .get();
+    final data = snap.data();
+    final name = data?['documentName'] as String?;
+    final ts = data?['documentUploadedAt'];
+    if (name == null || ts is! Timestamp) return null;
+    return (name: name, uploadedAt: ts.toDate(), title: data?['documentTitle'] as String?);
   }
 
   /// The same field shape written to Firestore by both [_saveData] (the
@@ -1466,6 +1588,26 @@ class DataEntryViewModel extends ChangeNotifier {
   }
 
   // ── Combined Courses ─────────────────────────────────────────────────────────
+  /// Whether force-syncing [classId]'s [courseId] assignment onto
+  /// [timeSlotId]/[days] would collide with a DIFFERENT course already
+  /// sitting there for that same class. Siblings of the same combined
+  /// course are never a clash by design (that's the point of combining) —
+  /// this only catches an unrelated course getting silently overwritten,
+  /// which is what force-syncing a second combined group used to do.
+  bool _combinedMoveClashes(String classId, String courseId,
+      String excludeAssignmentId, List<int> days, String timeSlotId) {
+    final target = _timeSlots.where((t) => t.id == timeSlotId).firstOrNull;
+    if (target == null) return false;
+    for (final other in _assignments) {
+      if (other.id == excludeAssignmentId) continue;
+      if (other.classModel.id != classId || other.course.id == courseId) continue;
+      final otherSlot = _timeSlots.where((t) => t.id == other.timeSlotId).firstOrNull;
+      if (otherSlot == null || !_slotsOverlap(target, otherSlot)) continue;
+      if (days.toSet().intersection(other.occupiedSlots.toSet()).isNotEmpty) return true;
+    }
+    return false;
+  }
+
   /// Returns log lines describing what happened, or a single line starting
   /// with 'ERROR:' if the rule was rejected outright (nothing is saved in
   /// that case — callers should check for that prefix before treating this
@@ -1548,6 +1690,14 @@ class DataEntryViewModel extends ChangeNotifier {
         continue;
       }
 
+      if (_combinedMoveClashes(a.classModel.id, rule.courseId, a.id,
+          anchor.occupiedSlots, anchor.timeSlotId)) {
+        log.add('Skipped ${a.classModel.shortCode} — already has another '
+            'course at ${anchor.timeSlotId}. Resolve that clash first, '
+            'then re-combine or use Fix Now to align it.');
+        continue;
+      }
+
       // Sync to anchor AND pin so GA keeps the group together
       _assignments[idx] = a.copyWith(
         timeSlotId: anchor.timeSlotId,
@@ -1567,6 +1717,13 @@ class DataEntryViewModel extends ChangeNotifier {
       if (byClassId.containsKey(classId)) continue;
       final cls = _classes.where((c) => c.id == classId).firstOrNull;
       if (cls == null) continue;
+
+      if (_combinedMoveClashes(classId, rule.courseId, '',
+          anchor.occupiedSlots, anchor.timeSlotId)) {
+        log.add('Skipped creating for ${cls.shortCode} — already has '
+            'another course at ${anchor.timeSlotId}.');
+        continue;
+      }
 
       // Created sibling — pinned so GA keeps it with the group
       _assignments.add(Assignment(
@@ -1615,8 +1772,10 @@ class DataEntryViewModel extends ChangeNotifier {
   }
 
   // Re-applies ALL existing time slot locks AND combined rules to the current
-  // assignments. FORCE mode — no clash checks. The user explicitly set these
-  // rules so we honour them unconditionally. Returns total assignments moved.
+  // assignments. Locks force-apply unconditionally (explicit per-course
+  // placement). Combined-rule sync skips a class whose slot is already
+  // taken by a DIFFERENT course for it — see _combinedMoveClashes — instead
+  // of silently overwriting into a clash. Returns total assignments moved.
   int reApplyAllRules() {
     int moved = 0;
 
@@ -1674,6 +1833,15 @@ class DataEntryViewModel extends ChangeNotifier {
             a.occupiedSlots.toSet().containsAll(anchor.occupiedSlots) &&
             anchor.occupiedSlots.toSet().containsAll(a.occupiedSlots)) {
           continue; // already matches
+        }
+        // Never force this class onto a slot that's already holding a
+        // DIFFERENT course for it — that's a real clash, not a re-sync,
+        // and this runs unattended on every app load. Leave it be; the
+        // admin resolves the underlying clash, then Fix Now/re-combine
+        // picks the class back up.
+        if (_combinedMoveClashes(a.classModel.id, rule.courseId, a.id,
+            anchor.occupiedSlots, anchor.timeSlotId)) {
+          continue;
         }
         final idx = _assignments.indexWhere((x) => x.id == a.id);
         if (idx == -1) continue;

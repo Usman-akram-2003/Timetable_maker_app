@@ -72,3 +72,6 @@ tool/batch_import/**/*.json
 # Installer build artifacts (large binaries) — keep the .iss script only
 installer/output/
 installer/vc_redist.x64.exe
+
+# Cloud Functions dependencies — reinstall via `npm install` in functions/
+functions/node_modules/
