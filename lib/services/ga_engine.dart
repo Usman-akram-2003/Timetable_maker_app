@@ -84,10 +84,6 @@ class GaEngine {
     final r = CancelableGaRun();
     return (result: r.run(_runGA, input), cancel: r.cancel);
   }
-
-  // Kept for API compatibility (no longer used internally).
-  static List<List<int>> buildDayOptions(int workingDays) =>
-      List.generate(workingDays, (i) => [i + 1]);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

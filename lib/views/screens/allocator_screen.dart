@@ -1988,12 +1988,13 @@ class _AllocatorScreenState extends State<AllocatorScreen> {
           existingSameCourseClass.where((a) => a.teacher.id == _teacher!.id).length;
 
       // A second same-teacher entry is exactly what completing a manual
-      // Bachelor split looks like (e.g. 1 day pinned, then 2 more days to
-      // finish a 3cr course) — only block it once a real duplicate is being
-      // attempted: a 3rd piece, an Intermediate class (never split), or a
-      // course whose credit hours aren't in the split-eligible 2-3 range.
+      // Bachelor split looks like (e.g. 1-2 pinned in one slot, then 4-5
+      // in another to finish the course) — only block it once a real
+      // duplicate is being attempted: a 3rd piece, an Intermediate class
+      // (never split), or a course whose credit hours aren't in the
+      // split-eligible 2-6 range.
       final isSplitEligible = _class!.level == EducationLevel.bachelors &&
-          _course!.creditHours >= 2 && _course!.creditHours <= 3;
+          _course!.creditHours >= 2 && _course!.creditHours <= 6;
       final blocked = otherTeacherAssignment != null ||
           (sameTeacherCount >= 1 && (sameTeacherCount >= 2 || !isSplitEligible));
 
@@ -2323,13 +2324,13 @@ class _AllocatorScreenState extends State<AllocatorScreen> {
       final existingForClass = existingForClassAll.firstOrNull;
 
       // Same split-completion allowance as the pre-check above: a same-
-      // teacher second piece for a Bachelor 2-3cr course is a legitimate
+      // teacher second piece for a Bachelor 2-6cr course is a legitimate
       // manual split, not a duplicate — only block once it'd be a 3rd piece.
       final isSplitPiece = existingForClass != null &&
           existingForClass.teacher.id == _teacher!.id &&
           existingForClassAll.length < 2 &&
           cls.level == EducationLevel.bachelors &&
-          _course!.creditHours >= 2 && _course!.creditHours <= 3;
+          _course!.creditHours >= 2 && _course!.creditHours <= 6;
 
       if (existingForClass != null && !isSplitPiece) {
         if (isPrimary) {

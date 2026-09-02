@@ -432,13 +432,13 @@ class _MatrixScreenState extends State<MatrixScreen>
       {required bool clash, required bool elective, required bool bach, required bool isDark}) {
     if (isDark) {
       if (clash) return (bg: const Color(0xFFB91C1C), fg: Colors.white, fgSoft: const Color(0xFFFCA5A5));
-      if (elective) return (bg: const Color(0xFFB45309), fg: Colors.white, fgSoft: const Color(0xFFFDE68A));
+      if (elective) return (bg: const Color(0xFF15803D), fg: Colors.white, fgSoft: const Color(0xFFBBF7D0));
       return bach
           ? (bg: const Color(0xFF0E7490), fg: Colors.white, fgSoft: const Color(0xFFA5F3FC))
           : (bg: const Color(0xFF1D4ED8), fg: Colors.white, fgSoft: const Color(0xFFBFDBFE));
     }
     if (clash) return (bg: const Color(0xFFFEE2E2), fg: const Color(0xFFB91C1C), fgSoft: const Color(0xFFDC2626));
-    if (elective) return (bg: const Color(0xFFFEF3C7), fg: const Color(0xFFB45309), fgSoft: const Color(0xFFD97706));
+    if (elective) return (bg: const Color(0xFFDCFCE7), fg: const Color(0xFF15803D), fgSoft: const Color(0xFF16A34A));
     return bach
         ? (bg: const Color(0xFFCFFAFE), fg: const Color(0xFF0E7490), fgSoft: const Color(0xFF0891B2))
         : (bg: const Color(0xFFDBEAFE), fg: const Color(0xFF1D4ED8), fgSoft: const Color(0xFF2563EB));
@@ -1465,8 +1465,8 @@ class _MatrixScreenState extends State<MatrixScreen>
           // reads as one block without stacking translucency — darker than
           // the entries in dark mode, a touch deeper pastel in light mode.
           final containerCol = ctx._dk
-              ? (groupHasClash ? const Color(0xFF7F1D1D) : const Color(0xFF78350F))
-              : (groupHasClash ? const Color(0xFFFECACA) : const Color(0xFFFDE68A));
+              ? (groupHasClash ? const Color(0xFF7F1D1D) : const Color(0xFF14532D))
+              : (groupHasClash ? const Color(0xFFFECACA) : const Color(0xFFBBF7D0));
           final int N = eg.entries.length;
 
           List<int> startIndex = List.filled(span, 0);
@@ -1540,13 +1540,11 @@ class _MatrixScreenState extends State<MatrixScreen>
                                 const SizedBox(width: 3),
                               ],
                               Expanded(child: Text(e.courseName, style: GoogleFonts.plusJakartaSans(
-                                  fontWeight: FontWeight.w800, fontSize: 11, color: pal.fg),
-                                  overflow: TextOverflow.ellipsis, maxLines: 1)),
+                                  fontWeight: FontWeight.w800, fontSize: 11, color: pal.fg))),
                             ]),
                             const SizedBox(height: 2),
                             Text(e.teacherName, style: GoogleFonts.plusJakartaSans(
-                                fontSize: 9, color: pal.fgSoft),
-                                overflow: TextOverflow.ellipsis),
+                                fontSize: 9, color: pal.fgSoft)),
                             if (hasRoom) ...[
                               const SizedBox(height: 1),
                               Row(children: [
@@ -1614,12 +1612,11 @@ class _MatrixScreenState extends State<MatrixScreen>
                   Icon(Icons.warning_rounded, size: 10, color: pal.fg),
                   const SizedBox(width: 3),
                   Expanded(child: Text(a.course.name, style: GoogleFonts.plusJakartaSans(
-                      fontWeight: FontWeight.w800, color: pal.fg, fontSize: 11),
-                      overflow: TextOverflow.ellipsis, maxLines: 1)),
+                      fontWeight: FontWeight.w800, color: pal.fg, fontSize: 11))),
                 ]),
                 const SizedBox(height: 2),
                 Text(a.teacher.name, style: GoogleFonts.plusJakartaSans(
-                    fontSize: 9, color: pal.fgSoft), overflow: TextOverflow.ellipsis, maxLines: 1),
+                    fontSize: 9, color: pal.fgSoft)),
                 if (formatDaysLabel(allDays) != null) Row(children: [
                   Icon(Icons.calendar_today_rounded, size: 8, color: pal.fgSoft),
                   const SizedBox(width: 2),
@@ -1685,12 +1682,11 @@ class _MatrixScreenState extends State<MatrixScreen>
                       const SizedBox(width: 3),
                     ],
                     Expanded(child: Text(a.course.name, style: GoogleFonts.plusJakartaSans(
-                        fontWeight: FontWeight.w800, color: pal.fg, fontSize: 11),
-                        overflow: TextOverflow.ellipsis, maxLines: 1)),
+                        fontWeight: FontWeight.w800, color: pal.fg, fontSize: 11))),
                   ]),
                   const SizedBox(height: 2),
                   Text(a.teacher.name, style: GoogleFonts.plusJakartaSans(
-                      fontSize: 9, color: pal.fgSoft), overflow: TextOverflow.ellipsis, maxLines: 1),
+                      fontSize: 9, color: pal.fgSoft)),
                   if (formatDaysLabel(allDays) != null) Row(children: [
                     Icon(Icons.calendar_today_rounded, size: 8, color: pal.fgSoft),
                     const SizedBox(width: 2),
@@ -1743,10 +1739,9 @@ class _MatrixScreenState extends State<MatrixScreen>
                 Text(programName, style: GoogleFonts.plusJakartaSans(
                     fontWeight: FontWeight.w800,
                     color: isBach ? AppTheme.accentCyan : AppTheme.accentBlue,
-                    fontSize: 10), overflow: TextOverflow.ellipsis, maxLines: 1),
+                    fontSize: 10)),
               Text(classModel.name, style: GoogleFonts.plusJakartaSans(
-                  fontWeight: FontWeight.w700, color: ctx._tp, fontSize: 12.5),
-                  overflow: TextOverflow.ellipsis),
+                  fontWeight: FontWeight.w700, color: ctx._tp, fontSize: 12.5)),
               Text('${asgns.length} subj', style: GoogleFonts.plusJakartaSans(
                   fontSize: 9.5, color: ctx._tm)),
               if (shift != null) Container(
@@ -2055,19 +2050,16 @@ class _MatrixScreenState extends State<MatrixScreen>
                   Icon(Icons.warning_amber_rounded, color: pal.fg, size: 10),
                   const SizedBox(width: 2),
                   Expanded(child: Text(a.course.name, style: GoogleFonts.plusJakartaSans(
-                      fontWeight: FontWeight.w800, color: pal.fg, fontSize: 11),
-                      overflow: TextOverflow.ellipsis, maxLines: 1)),
+                      fontWeight: FontWeight.w800, color: pal.fg, fontSize: 11))),
                 ]) else Text(a.course.name, style: GoogleFonts.plusJakartaSans(
-                    fontWeight: FontWeight.w800, color: pal.fg, fontSize: 11),
-                    overflow: TextOverflow.ellipsis, maxLines: 1),
+                    fontWeight: FontWeight.w800, color: pal.fg, fontSize: 11)),
                 const SizedBox(height: 2),
                 // Secondary info: class names (electives list all attending classes)
                 Builder(builder: (_) {
                   final teachers = group.map((x) => x.teacher.name).toSet().join(', ');
                   return Text(teachers, style: GoogleFonts.plusJakartaSans(
                       fontSize: 9, color: pal.fgSoft,
-                      fontWeight: isElective ? FontWeight.w700 : FontWeight.w400),
-                      overflow: TextOverflow.ellipsis, maxLines: 2);
+                      fontWeight: isElective ? FontWeight.w700 : FontWeight.w400));
                 }),
                 // Days row — same icon + format as class-wise
                 if (formatDaysLabel(allDays) != null) Row(children: [
@@ -2102,8 +2094,7 @@ class _MatrixScreenState extends State<MatrixScreen>
                       Flexible(child: Text(classes,
                           style: GoogleFonts.plusJakartaSans(
                               fontSize: 9, fontWeight: FontWeight.w700,
-                              color: pal.fgSoft),
-                          overflow: TextOverflow.ellipsis, maxLines: 1)),
+                              color: pal.fgSoft))),
                     ]),
                   );
                 }),
@@ -2163,8 +2154,7 @@ class _MatrixScreenState extends State<MatrixScreen>
                       Flexible(child: Text(realRoomName,
                           style: GoogleFonts.plusJakartaSans(
                               fontWeight: FontWeight.w600,
-                              color: ctx._tp, fontSize: 11),
-                          overflow: TextOverflow.ellipsis)),
+                              color: ctx._tp, fontSize: 11))),
                     ]),
                   );
 
@@ -2373,11 +2363,9 @@ class _MatrixScreenState extends State<MatrixScreen>
                   Icon(Icons.warning_amber_rounded, color: pal.fg, size: 10),
                   const SizedBox(width: 2),
                   Expanded(child: Text(a.course.name, style: GoogleFonts.plusJakartaSans(
-                      fontWeight: FontWeight.w800, color: pal.fg, fontSize: 11),
-                      overflow: TextOverflow.ellipsis, maxLines: 1)),
+                      fontWeight: FontWeight.w800, color: pal.fg, fontSize: 11))),
                 ]) else Text(a.course.name, style: GoogleFonts.plusJakartaSans(
-                    fontWeight: FontWeight.w800, color: pal.fg, fontSize: 11),
-                    overflow: TextOverflow.ellipsis, maxLines: 1),
+                    fontWeight: FontWeight.w800, color: pal.fg, fontSize: 11)),
                 const SizedBox(height: 2),
                 // Secondary info: class names (electives list all attending classes)
                 Builder(builder: (_) {
@@ -2397,8 +2385,7 @@ class _MatrixScreenState extends State<MatrixScreen>
                   }
                   return Text(label, style: GoogleFonts.plusJakartaSans(
                       fontSize: 9, color: pal.fgSoft,
-                      fontWeight: isElective ? FontWeight.w700 : FontWeight.w400),
-                      overflow: TextOverflow.ellipsis, maxLines: 2);
+                      fontWeight: isElective ? FontWeight.w700 : FontWeight.w400));
                 }),
                 // Days row — same icon + format as class-wise
                 if (formatDaysLabel(allDays) != null) Row(children: [
@@ -2480,8 +2467,7 @@ class _MatrixScreenState extends State<MatrixScreen>
                       Flexible(child: Text(realRoomName,
                           style: GoogleFonts.plusJakartaSans(
                               fontWeight: FontWeight.w600,
-                              color: ctx._tp, fontSize: 11),
-                          overflow: TextOverflow.ellipsis)),
+                              color: ctx._tp, fontSize: 11))),
                     ]),
                   );
 
